@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+	<title>IIInventory :: Inventory</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"/>
+    <meta charset="utf-8"/>
+
+	<link rel="stylesheet" href="jqm/themes/jqmbasetheme.css" />
+
+    <link rel="stylesheet" href="jqm/themes/jquery.mobile.icons.min.css" />
+    <link rel="stylesheet" href="jqm/jquery.mobile.custom.structure.min.css" />
+    <link rel="stylesheet" href="css/inventory.css" />
+
+	<script src="js/jquery-1.11.0.js"></script>
+    <!--<script src="https://code.jquery.com/jquery-1.7.2.min.js"></script>-->
+
+    <script src="js/jquery-ui-1.11.4.custom/jquery-ui.js"></script>
+    <script src="js/jquery.ui.touch-punch.min.js"></script>
+
+    <!--jQuery Mobile is 1.4.5-->
+	<script src="jqm/jquery.mobile.custom.js"></script>
+
+
+    <!--<link rel="stylesheet" href="js/jquery-ui-1.11.4.custom/jquery-ui.min.css">-->
+    <!--<script src="js/jquery-ui-1.11.4.custom/external/jquery/jquery.js"></script>-->
+    <!--<script src="js/jquery-ui-1.11.4.custom/jquery-ui.min.js"></script>-->
+
+    <!--<script src="http://code.jquery.com/jquery-1.7.2.min.js"></script>-->
+
+	<script src="js/iijslib.js"></script>
+    <script src="js/inventoryjslib.js"></script>
+
+</head>
+
+<body>
+	<div data-role="page" id="demo-page" data-theme="d">
+
+<script>
+
+var paneloptions = {};
+var stockdata = [];
+
+var uisettings = {};
+var filteritems = ['status', 'qtystatus', 'supplier', 'manufacturer', 'type'];
+var filternames = ['Status', 'QtyStatus', 'Supplier', 'Manufacturer', 'Type' ];
+
+// So we can do this in the browser, which brings all data to the browser, but allows quicker filter revisions
+// Or we can filter on the server, which minimizes data sent to the browser, but makes revision of filters slower
+// due to having to fetch it every time.
+
+var filtermethod = 'browser';
+
+function filterData(data) {
+    var tempfiltereddata = []
+    for (var j=0;j<data.length;j++) {
+        var datum = data[j];
+        var keepdatum=true;
+        for (var i = 0; i < filteritems.length; i++) {
+            var filteritem = filteritems[i];
+            var propertyname ='stock' + filteritem + 'filter';
+            if (uisettings.hasOwnProperty(propertyname)) {
+                var propertyvalue = uisettings[propertyname];
+                if (['all', 'All'].indexOf(propertyvalue) < 0) {
+                    console.log('is not all. Is ' + propertyvalue)
+                    if (datum[filteritem] == propertyvalue) {
+                        console.log('property match for part ' + datum.partid + ' with value ' + datum[filteritem])
+                    }
+                    else {
+                        keepdatum = false
+                    }
+                }
+            }
+        }
+        if (keepdatum) {
+            tempfiltereddata.push(datum)
+        }
+    }
+    return tempfiltereddata;
+}
+
+function uiInit() {
+    // This is where we will get this stuff from the uisettings table
+    uisettings = {stockstatusfilter:'active', stockqtystatusfilter:'all', stocksupplierfilter:'all', stockmanufacturerfilter:'all', stocktypefilter:'all'}
+}
+
+function uiRefresh() {
+    // This function runs just to fresh front panel settings from the uisettings object.
+    // We can use this to refresh after creating the filter elements
+    // The filter elements have to be recreated and populated every time the stock is updated, so they cannot
+    // be static.
+
+    for (var i=0;i<filteritems.length; i++) {
+        var filteritem = filteritems[i];
+        var propertyname ='stock' + filteritem + 'filter';
+//        console.log(propertyname)
+        if (uisettings.hasOwnProperty(propertyname)) {
+            var propertyvalue = uisettings[propertyname];
+            console.log(propertyname + ' : ' + uisettings[propertyname]);
+            $('#' + filteritem + 'filterjqmselect').val(propertyvalue);
+            $('#' + filteritem + 'filterjqmselect').selectmenu('refresh');
+        }
+    }
+}
+
+function uiSettingsGet(){
+
+    for (var i=0;i<filteritems.length; i++) {
+        var filteritem = filteritems[i];
+        var propertyname ='stock' + filteritem + 'filter';
+        if (uisettings.hasOwnProperty(propertyname)) {
+
+            var currentvalue = $('#' + filteritem + 'filterjqmselect').val();
+            console.log(currentvalue)
+            console.log(propertyname)
+            uisettings[propertyname] = currentvalue
+        }
+        else{
+            console.log('ERROR with uisettings value ' + propertyname)
+        }
+    }
+    console.log(uisettings)
+}
+
+function addSubmit(){
+
+    var partdata = {};
+
+    var valuelist = ['partid', 'description', 'notes', 'manufacturer', 'manufacturerpart', 'supplier',
+            'supplierpart', 'cost', 'costqty', 'costqtyunit', 'type', 'inventory']
+    for (var i=0; i<valuelist.length; i++) {
+        partdata[valuelist[i]] = $('#addedit' + valuelist[i]).val()
+    }
+    // Do some verification
+    console.log('inside addSubmit')
+//    addPart({partdata:partdata, callback:getAndRenderStock()});
+    addPart({partdata:partdata});
+
+}
+
+function getAndRenderStock(options) {
+//    console.log('trying to render stock')
+    options=options || {};
+    options.callback=renderStockResponse;
+    options.tablename='stock';
+    options.database=stockdatabase;
+    options.url='/wsgiinventory';
+	wsgiCallbackTableData(options)
+}
+
+function renderStockResponse (response,options) {
+
+    var timeout = 0
+    // Set interval function. We either pass a class to retrieve it from,
+    // a static value, or nothing
+    if (options.hasOwnProperty('timeoutclass')) {
+        timeout = $('.' + options.timeoutclass).val() * 1000;
+    }
+    else if (options.hasOwnProperty('timeout')) {
+        timeout = options.timeout;
+    }
+    if (timeout > 0) {
+        setTimeout(function () {
+            getAndRenderStock(options)
+        }, timeout);
+    }
+    if (response.hasOwnProperty('data')) {
+        stockdata = response.data;
+    }
+    else {
+        console.log('no data returned.')
+    }
+    renderStockTable(stockdata);
+}
+
+function renderStockTable(stockdata){
+    var htmlstring = '';
+    var itemlistitems = ['partid', 'description', 'qtystock', 'qtyonorder', 'qtyreserved', 'qtyavailable', 'cost', 'supplier'];
+    var itemlistnames = ['partid', 'description', 'stock', 'onorder', 'reserved', 'avail', 'cost', 'supplier'];
+    var itemlistwidths = [40, 160, 50, 50, 50, 50, 50, 100]
+
+    var filtereddata = []
+    if (filtermethod == 'browser') {
+        filtereddata = filterData(stockdata);
+    }
+    console.log('filtereddata is of length: ' +filtereddata.length)
+    // Sort the data. We do this in js because we want to be able to change it on the fly
+    filtereddata.sort(function(a, b) {
+        return (a.partid > b.partid) ? 1 : ((b.partid > a.partid) ? -1 : 0)
+    });
+
+    // Let's make a list of descriptions
+    htmlstring += '<li class="headerrow"><table><tr><td style="width:76px; font-size:10px">';
+    for (var j=0;j<itemlistitems.length;j++){
+        htmlstring += '<td style="text-align:center; width:' + itemlistwidths[j] +'px">' + itemlistnames[j] + '</td>'
+    }
+    htmlstring += '</tr></table></li>';
+    for (var i=0;i<filtereddata.length;i++){
+        var stockitem = filtereddata[i];
+//        console.log(stockitem)
+        htmlstring += '' +
+        '<li class="selectionitem">' +
+            '<table><tr>' +
+                '<td class="stockitemcbtd">' +
+                    '<input  type="checkbox" name="listitem' + i + '" class="listitemcb" id="listitemcb_' + i + '">' +
+                '</td>'+
+                '<td>' +
+                    '<div class="itembuttondiv edittip"><a href="#addedititempopup" class="stockitemeditbutton" id="stockitemeditbutton_' + i + '" data-theme="f"  data-rel="popup" data-role="button" data-icon="edit" data-iconpos="notext">Edit</a></div>' +
+                '</td>' +
+                '<td>' +
+                    '<div class="itembuttondiv edittip"><a href="#" class="stockitemcopybutton" id="stockitemcopybutton_' + i + '" data-theme="f" data-role="button" data-icon="action" data-iconpos="notext">Copy</a></div>' +
+                '</td>';
+
+        for (var j=0;j<itemlistitems.length;j++) {
+//            console.log(stockitem[j])
+            htmlstring += '<td style="text-align:center; width:' + itemlistwidths[j] +'px" id="item' + j + stockitem[j] + '">' +
+                    stockitem[itemlistitems[j]] +
+                '</td>'
+        }
+        htmlstring +='</tr></table>' +
+        '</li>'
+    }
+    htmlstring += '<li class="lastli">&nbsp;</li>'
+//    console.log(htmlstring)
+    $('#itemslist').html(htmlstring);
+    $('#itemslist').trigger('create');
+
+    $('.stockitemeditbutton').click({},function(event){
+        // Use the id of the button that was clicked to populate the addedit window
+
+        var id = event.target.id;
+        var index = id.split('_')[1]
+//        console.log('index ' + index + ' selected.')
+        var item = stockdata[index]
+        // Render data into item edit window
+        var renderitems = ['partid', 'description', 'notes', 'manufacturer', 'manufacturerpart', 'supplier',
+            'supplierpart', 'cost', 'costqty', 'costqtyunit', 'type', 'inventory']
+
+        for (var i=0;i<renderitems.length;i++){
+            var renderitem = renderitems[i];
+            var selector = $('#addedit' + renderitem);
+            selector.val(item[renderitem]);
+            if (selector.is("select")) {
+                selector.selectmenu('refresh')
+            }
+        }
+    });
+    $('.stockitemcopybutton').click({},function(event){
+        var id = event.target.id;
+        var index = id.split('_')[1]
+        var item = stockdata[index]
+        var partdata = {partid:item['partid']}
+        copyPart({partdata:partdata})
+    });
+    renderSelectionTable({inventory:stockdata});
+}
+
+function renderSelectionTable(options) {
+
+    options = options || {};
+    // So what we will do here at some point is grab ui settings and render based on what is there.
+
+    var selectionoptions = {}
+    if (!options.hasOwnProperty('inventory')) {
+        selectionoptions.status = ['all','active','inactive']
+        selectionoptions.qtystatus = ['all','none', 'available', 'toorder']
+        selectionoptions.supplier = ['all','active','inactive']
+        selectionoptions.manufacturer = ['all','allied','eoff', 'platt', 'galco']
+        selectionoptions.type = ['all','parts','labor']
+    }
+    else {
+        // Get options from inventory. Could stripe this either way
+        for (var i=0; i<filteritems.length;i++){
+            var filteritem = filteritems[i];
+            selectionoptions[filteritem] = ['all'];
+            for (var j=0;j<options.inventory.length;j++){
+                var itemname = options.inventory[j][filteritem];
+                if (selectionoptions[filteritem].indexOf(itemname)< 0) {
+                    selectionoptions[filteritem].push(itemname)
+                }
+            }
+        }
+    }
+
+    var htmlstring = '';
+
+    // Now put in selectionitems
+    for (var i=0;i<filteritems.length;i++){
+        var selectlistitem = filteritems[i]
+        var selectlistname = filternames[i]
+        htmlstring += '' +
+        '<li class="selectionlistitem">' +
+                '<label for="' +  selectlistitem + 'filterjqmselect" >'+ selectlistname + '</label>' +
+                '<select name="'+ selectlistitem + 'filterjqmselect" class="filterselect" id="'+ selectlistitem + 'filterjqmselect" >' + selectlistitem + '>'
+
+        // now insert options
+        var selectionoptionlist = selectionoptions[selectlistitem]
+        for (var j=0;j<selectionoptionlist.length; j++) {
+            htmlstring+= '<option value="' + selectionoptionlist[j] + '">' + selectionoptionlist[j] + '</option>'
+        }
+
+        htmlstring += '</select>';
+        htmlstring += '</li>';
+
+    }
+
+//    htmlstring+='<li>Sort by</li>';
+//    htmlstring+='<li>Sort by</li>';
+//    htmlstring+='<li>Sort by</li>';
+//    htmlstring+='<li>Sort by</li>';
+//    htmlstring += '<li class="lastli">&nbsp;</li>'
+//    console.log(htmlstring)
+    $('#selectionslistview').html(htmlstring);
+
+    $('.filterselect').change(function(){
+        console.log('change')
+        uiSettingsGet();
+
+        // if we do browser filtering, we just have to apply the filter to the data in the DOM
+        if (filtermethod=='browser'){
+            renderStockTable(stockdata)
+        }
+        else {
+            getAndRenderStock()
+        }
+    });
+
+    $('#selectionslistview').trigger('create');
+
+    // Set values to existing filter values. Have to wait until they are triggered as created widgets.
+    uiRefresh();
+}
+
+
+$(document).ready(function(){
+
+    // This just loads up uisettings for use elsewhere.
+    uiInit();
+
+    $(".addtip").attr('title', 'Add an item');
+    $(".copytip").attr('title', 'Copy an item');
+    $(".deletetip").attr('title', 'Delete an item');
+    $(".edittip").attr('title', 'Edit an item');
+    $(".importtip").attr('title', 'Import from .csv');
+    $(".cleartip").attr('title', 'Clear filters');
+//    console.log("I am apparently executing ...");
+    $("#addsubmit").click(function(){addSubmit()});
+    $("#deleteitemsbutton").click(function(){
+
+        // Iterate over items to find those selected.
+        console.log('active on click')
+        var partidstodelete = [];
+        var contentmessage = 'You are trying to delete:<br />';
+        var itemsselected = false;
+        $('.listitemcb').each(function(){
+            if ($(this).prop('checked')) {
+                itemsselected = true;
+                var id = $(this).attr('id');
+                console.log(id)
+                var index = id.split('_')[1]
+                var partid = stockdata[index]['partid']
+                partidstodelete.push(partid)
+                contentmessage += partid + '<br />'
+            }
+        });
+        if (itemsselected) {
+            contentmessage += '<a href="#" data-icon="delete" data-theme="g" data-role="button" id="deletesubmit" style="margin-top:30px">Delete Part(s)</a>'
+        }
+        else {
+            contentmessage = 'No items selected for deletion'
+        }
+        $('#deleteitempopupcontent').html(contentmessage)
+        $('#deleteitempopupcontent').trigger('create')
+        $('#deletesubmit').click(function(){
+            partidstodelete.push('anonexistentpart')
+            deleteParts({partids:partidstodelete})
+        })
+    });
+
+    $( "#addedititempopup" ).draggable();
+    $( "#deleteitemspopup" ).draggable();
+//    getAndRenderInventoryList();
+
+    getAndRenderStock({timeout:5000});
+
+})
+
+</script>
+    <!-- /header -->
+    <div data-role="header" >
+        <h1>IIInventory</h1>
+        <a href="#nav-panel" data-icon="bars" data-theme="e" data-iconpos="notext">Menu</a>
+        <a href="#settings" data-icon="gear" data-theme="e" data-iconpos="notext">Add</a>
+    </div>
+    <!-- /header -->
+
+    <div data-role="content" class="ui-content-main" style="min-height:600px">
+            <div role="main" class="ui-content content-one" id="content-one">
+                <ul data-role="listview" id="selectionsoptionslistview" data-inset="true" style="width:99%; border:solid; border-width:0 0.1em; border-color:#AAA; margin-bottom:0; box-shadow:none; -webkit-box-shadow: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0">
+                    <li data-role="list-divider">Select Panel</li>
+                    <li style="padding:0.2em 1em; border-width:0 0 0.1em 0; border-color:#777" >
+                        <div class="ui-grid-a" >
+                            <div class="ui-block-a">
+                                <div class="buttondiv"><a id="clearfilters" data-theme="g" data-rel="popup" data-role="button" data-icon="delete" data-iconpos="notext">Delete</a></div>
+                            </div>
+                            <div class="ui-block-b">
+                                 Clear filters
+                                <!--<div class="buttondiv addtip"><a href="#addpopup" data-rel="popup" data-theme="f" data-role="button" data-icon="plus" data-iconpos="notext">Add</a></div>-->
+                            </div>
+
+                        </div>
+                    </li>
+                </ul>
+                <ul data-role="listview" id="selectionslistview" class="selectionslistview ui-corner-all ui-shadow" data-inset="true" style="width:99%;height:100%;margin-bottom:2em; border:solid; border-width:0 0.1em; border-color:#AAA; border-top-left-radius: 0; border-top-right-radius: 0">
+                    <!--<div id="selectionslist">-->
+                        &nbsp;
+                    <!--</div>-->
+                </ul>
+            </div>
+            <div role="main" class="ui-content content-two" style="height:750px;">
+                <ul data-role="listview" data-inset="true" style="width:99%; border:solid; border-width:0 0.1em; border-color:#AAA; margin-bottom:0; box-shadow:none; -webkit-box-shadow: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0">
+                    <li data-role="list-divider">Content Panel</li>
+                    <li style="padding:0.2em 1em; border-width:0 0 0.1em 0; border-color:#777" class="headerrow">
+                        <div class="ui-grid-c" >
+                            <div class="ui-block-a" style="width:40px">
+                                <div class="buttondiv addtip"><a href="#addedititempopup" data-rel="popup" data-theme="f" data-role="button" data-icon="plus" data-iconpos="notext">Add</a></div>
+                            </div>
+                            <div class="ui-block-b" style="width:40px">
+                                <div class="buttondiv edittip"><a href="#edititemspopup" data-rel="popup" data-theme="f" data-role="button" data-icon="edit" data-iconpos="notext">Add</a></div>
+                            </div>
+                            <div class="ui-block-c" style="width:40px">
+                                <div class="buttondiv deletetip"><a href="#deleteitemspopup" id='deleteitemsbutton' data-theme="g" data-rel="popup" data-role="button" data-icon="delete" data-iconpos="notext">Delete</a></div>
+                            </div>
+                            <div class="ui-block-d" style="width:40px">
+                                <div class="buttondiv importtip"><a href="#importitemspopup" data-theme="f" data-rel="popup" data-role="button" data-icon="arrow-u" data-iconpos="notext">Delete</a></div>
+                            </div>
+                        </div>
+                    </li>
+                </ul>
+                <ul class="itemslistview ui-corner-all ui-shadow" data-inset="true" style="width:99%; border:solid; border-width:0 0.1em; border-color:#AAA; border-top-left-radius: 0; border-top-right-radius: 0">
+                    <div id="itemslist">
+                        &nbsp;
+                    </div>
+                </ul>
+            </div>
+	    <div role="main" class="ui-content content-full" >
+            Nothing here.
+        </div>
+    </div><!-- /content -->
+
+    <!-- Popups -->
+    <div data-role="popup" id="addedititempopup" data-overlay-theme="a" data-theme="b" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="b" class="ui-corner-top ui-dialog-header">
+            <h3>Add/Edit Item</h3>
+        </div>
+        <div data-role="content" data-theme="a" class="ui-corner-bottom ui-dialog-content addedititempopupcontent">
+            <label for="addeditpartid">PartID</label>
+            <input type="text" name="addeditpartid" id="addeditpartid" value=""  />
+
+            <label for="addeditdescription">Description</label>
+            <textarea name="addeditdescription" id="addeditdescription" value="" style="height:100px; vertical-align:text-top"></textarea>
+
+            <label for="addeditnotes">Notes</label>
+            <input type="text" name="addeditnotes" id="addeditnotes" value=""  />
+
+            <label for="addeditmanufacturer">MFR</label>
+            <input type="text" name="addeditmanufacturer" id="addeditmanufacturer" value=""  />
+
+            <label for="addeditmanufacturerpart">MFR PN</label>
+            <input type="text" name="addeditmanufacturerpart" id="addeditmanufacturerpart" value=""  />
+
+            <label for="addeditsupplier">Supplier</label>
+            <input type="text" name="addeditsupplier" id="addeditsupplier" value=""  />
+
+            <label for="addeditsupplierpart">Supp PN</label>
+            <input type="text" name="addeditsupplierpart" id="addeditsupplierpart" value=""  />
+
+            <label for="addeditcost">Cost</label>
+            <input type="text" name="addeditcost" id="addeditcost" value=""  />
+
+            <div class="ui-grid-a" style="padding-top:0; margin-top:0; border:none">
+                <div class="ui-block-a">
+                    <label for="addeditcostqty">Cost Quantity</label>
+                    <input type="text" name="addeditcostqty" id="addeditcostqty" value=""  />
+                </div>
+                <div class="ui-block-b">
+                    <label for="addeditcostqtyunit">Cost Unit</label>
+                    <input type="text" name="addeditcostqtyunit" id="addeditcostqtyunit" value=""  />
+                </div>
+            </div>
+            <div class="ui-grid-a" style="padding-top:0; margin-top:0; border:none">
+                <div class="ui-block-a">
+                    <label for="addedittype">Item Type</label>
+                    <select name="addedittype" id="addedittype" data-mini="true">
+                        <option value="parts">parts</option>
+                        <option value="labor">labor</option>
+                    </select>
+                </div>
+                <div class="ui-block-b">
+                    <label for="addeditinventory">Inventory</label>
+                    <select name="addeditinventory" id="addeditinventory" data-mini="true">
+                        <option value="std">Std</option>
+                        <option value="none">None</option>
+                    </select>
+                </div>
+            </div>
+            <a href="#" data-role="button" id="addsubmit" style="margin-top:30px">Add/Edit Part</a>
+        </div>
+    </div>
+    <div data-role="popup" id="deleteitemspopup" data-overlay-theme="a" data-theme="d" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="d" class="ui-corner-top ui-dialog-header">
+            <h3>Delete items?</h3>
+        </div>
+        <div data-role="content" id="deleteitempopupcontent" data-theme="a" class="ui-corner-bottom ui-dialog-content addedititempopupcontent">
+            <a href="#" data-role="button" id="deletesubmit" style="margin-top:30px">Add Part</a>
+        </div>
+    </div>
+
+
+
+
+    <!--/Popups -->
+    <!-- Panels -->
+    <style>
+        .nav-search .ui-btn-up-a {
+            background-image:none;
+            background-color:#333333;
+        }
+        .nav-search .ui-btn-inner {
+            border-top: 1px solid #888;
+            border-color: rgba(255, 255, 255, .1);
+        }
+    </style>
+
+        <div data-role="panel" data-position="left" data-position-fixed="false" data-display="reveal" id="nav-panel" data-theme="a">
+
+            <ul data-role="listview" data-theme="a" data-divider-theme="a" style="margin-top:-16px;" class="nav-search">
+                <li data-icon="delete" style="background-color:#111;">
+                    <a href="#" data-rel="close">Close menu</a>
+                </li>
+                <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                    <a href="inventory.html">Inventory</a>
+                </li>
+                <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                    <a href="inventory.html">Bill of Materials</a>
+                </li>
+                <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                    <a href="inventory.html">Assemblies</a>
+                </li>
+            </ul>
+
+            <!-- panel content goes here -->
+        </div><!-- /panel -->
+
+        <style>
+            .userform { padding:.8em 1.2em; }
+            .userform h2 { color:#555; margin:0.3em 0 .8em 0; padding-bottom:.5em; border-bottom:1px solid rgba(0,0,0,.1); }
+            .userform label { display:block; margin-top:1.2em; }
+            .switch .ui-slider-switch { width: 6.5em !important }
+            .ui-grid-a { margin-top:1em; padding-top:.8em; margin-top:1.4em; border-top:1px solid rgba(0,0,0,.1); }
+        </style>
+
+        <div data-role="panel" data-position="right" data-position-fixed="false" data-display="overlay" id="add-form" data-theme="b">
+
+            <form class="userform">
+                <h2>Create new user</h2>
+                <label for="name">Name</label>
+                <input type="text" name="name" id="name" value="" data-clear-btn="true" data-mini="true">
+
+                <label for="email">Email</label>
+                <input type="email" name="email" id="status" value="" data-clear-btn="true" data-mini="true">
+
+                <label for="password">Password:</label>
+                <input type="password" name="password" id="password" value="" data-clear-btn="true" autocomplete="off" data-mini="true">
+
+                <div class="switch">
+                <label for="status">Status</label>
+                <select name="status" id="slider" data-role="slider" data-mini="true">
+                    <option value="on">Active</option>
+                    <option value="off">Inactive</option>
+                </select>
+                </div>
+
+                <div class="ui-grid-a">
+                    <div class="ui-block-a"><a href="#" data-rel="close" data-role="button" data-theme="c" data-mini="true">Cancel</a></div>
+                    <div class="ui-block-b"><a href="#" data-rel="close" data-role="button" data-theme="b" data-mini="true">Save</a></div>
+                </div>
+            </form>
+
+            <!-- panel content goes here -->
+        </div><!-- /panel -->
+
+
+
+    <!-- /Panels -->
+
+	<div data-role="footer" data-theme="d">
+		<div class="footertext">Copyright 2016 Interface Innovations</div>
+	</div><!-- /footer -->
+</div><!-- /page -->
+
+</body>
+</html>

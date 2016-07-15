@@ -1,0 +1,299 @@
+/* All the size-independent stuff comes first, so it may be overridden by media queries below */
+
+.footertext {
+    margin: 15px 25px 15px 25px;
+    font-size: 12px;
+    font-weight: normal;
+}
+.ui-header .ui-title {
+    margin: 0px 10%;
+}
+
+/* Basic settings */
+.ui-li-static.ui-collapsible {
+    padding: 0;
+}
+.ui-li-static.ui-collapsible > .ui-collapsible-content > .ui-listview,
+.ui-li-static.ui-collapsible > .ui-collapsible-heading {
+    margin: 0;
+}
+.lastli {
+    height:0;
+    padding:0.1em
+}
+.ui-li-divider {
+    font-size: 16px
+}
+.ui-listview > .lastli {
+    height:0;
+    padding:0.2em
+}
+
+.buttondiv {
+    /* need to override grid and block definitions */
+    width:35px!important;
+}
+
+.content-full {
+    width:96%;
+    padding:0;
+}
+.ui-biglabel {
+    font-size: 1.1em !important;
+}
+.ui-btn-icon-left {
+    padding-left: 2.7em
+}
+.submitpopup {
+    width:280px;
+}
+
+
+/* Only for small screens */
+
+/* Only for small screens */
+@media all and (max-width: 750px) {
+    .ui-content{
+        padding:0.2em;
+    }
+    .gridstack {
+        width:100%;
+    }
+
+}
+
+/* This applies to larger settings */
+@media all and (min-width: 750px){
+    .submitpopup {
+        width:500px;
+    }
+	.type-home .ui-content {
+		margin-top: 5px;
+	}
+	.ui-mobile #jqm-homeheader {
+		max-width: 340px;
+	}
+	p.intro {
+		margin: 2em 0;
+	}
+	.type-home .ui-content,
+	.type-interior > .ui-content {
+		padding: 0;
+	}
+	.type-interior > .ui-content {
+		overflow: hidden;
+	}
+	.content-one {
+		text-align: left;
+		float: left;
+		width: 45%;
+	}
+	.content-one,
+	.type-interior .content-one {
+		margin: 0;
+		padding: 0;
+		/*background: none;*/
+		border-top: none;
+		position: relative;
+	}
+	.type-interior .content-one::after {
+		content: "";
+		display: inline-block;
+		position: absolute;
+		top: 0;
+		right: 0;
+		height: 1px;
+		width: 1px;
+		margin-bottom: -9999px;
+		padding-bottom: 9999px;
+		background: #bbb;
+	}
+
+	.ui-mobile #jqm-homeheader {
+		padding: 0;
+	}
+	.content-two, .content-three{
+		width: 45%;
+		float: right;
+		/*margin-top: 30px;*/
+		margin-right: 1%;
+		padding: 0;
+	}
+	/*.content-two ul:first-child {*/
+		/*margin-top: 0;*/
+	/*}*/
+	/* collapsible non-inset example */
+	.content-two .ui-collapsible-content ul:first-child,
+    .content-three .ui-collapsible-content ul:first-child {
+		margin-top: -10px;
+	}
+	.content-one h2 {
+		position: absolute;
+		left: -9999px;
+	}
+	.type-interior .content-two,
+    .type-interior .content-three {
+		padding: 1.5em 6% 3em 0;
+		margin: 0;
+	}
+	/* fix up the collapsibles - expanded on desktop */
+	.content-one .ui-collapsible-inset {
+		margin-bottom: -1px;
+	}
+	/* .content-one .ui-collapsible-heading {
+		display: none;
+	}
+	.content-one .ui-collapsible-contain {
+		margin:0;
+	}
+	.content-one .ui-collapsible-content {
+		display: block;
+		margin: 0;
+		padding: 0;
+	}*/
+	.content-one .ui-collapsible-content,
+	.content-one .ui-collapsible-content > .ui-listview .ui-li-last {
+		border-bottom-left-radius: 0;
+		border-bottom-right-radius: 0;
+	}
+	.type-interior  .content-one .ui-li-divider {
+		padding-top: 1em;
+		padding-bottom: 1em;
+	}
+	.type-interior .content-one {
+		margin: 0;
+		padding: 0;
+	}
+    .plots {
+        height:200px;
+    }
+    .fullplots {
+        height:300px;
+    }
+    .ui-field-contain div.ui-slider-switch {
+        width: 5.5em;
+    }
+}
+@media all and (min-width: 750px){
+    .ui-content-main {
+        padding-left:2%;
+        padding-right:0;
+    }
+	.content-one {
+		width: 47%;
+		padding-right:2%;
+		margin: 0;
+	}
+	.content-two, .content-three {
+		width: 50%;
+		padding-right: 1%;
+	}
+
+    .plots {
+        height:300px;
+    }
+    .fullplots {
+        height:500px;
+    }
+    .submitpopup {
+        top:-350px;
+    }
+}
+
+/* at this break, we go to full-widht three column layout */
+
+@media all and (min-width: 1200px){
+	.type-home .ui-content{
+		background-position: 38.5%;
+	}
+    .ui-content-main {
+        padding-left:2%;
+        padding-right:0;
+    }
+	.content-one {
+		width: 30%;
+		padding-right:3%;
+		margin: 0;
+	}
+	.type-interior .content-one {
+		margin: 0;
+		padding: 0;
+	}
+	.content-two, .content-three {
+		width: 45%;
+		margin-right: 5%;
+		padding-right: 3%;
+	}
+	.type-interior .content-two,
+    .type-interior .content-three {
+		width: 60%;
+	}
+    .plots {
+        height:500px;
+    }
+    .fullplots {
+        height:700px;
+    }
+}
+
+
+/* reset for popup examples */
+.type-interior .ui-popup.ui-content,
+.type-interior .ui-popup .ui-content {
+	background-position: 0 0;
+	background-repeat: no-repeat;
+	overflow: visible;
+}
+
+/* tables documenting enum-type settings */
+.enum-value {
+	vertical-align: top;
+	white-space: nowrap;
+}
+
+/* Navbar examples */
+.content-two > .ui-header,
+.content-two > .ui-footer {
+	overflow: hidden;
+}
+
+/* list styles */
+ul { margin:0; padding-left:0; }
+ul li { list-style:none; padding:.7em 0; margin:0; border-bottom:1px solid #e3e3e3; }
+ul ul li { border: none;}
+
+dl dd ul { padding-left: 40px; }
+dl dd ul li { list-style: disc; }
+dl dd ul li li { list-style: circle; }
+dl dd ul li li li { list-style: square; }
+dl dd ul li { border: none; }
+
+.ui-mobile-viewport .localnav li {
+	border: none;
+}
+.ui-corner-all {
+	-webkit-border-radius: .2em /*{global-radii-blocks}*/;
+	border-radius: .2em /*{global-radii-blocks}*/;
+}
+.tailli {
+    padding: 0 0!important;
+}
+body,
+input,
+select,
+textarea,
+button,
+.ui-btn {
+	font-size: 0.9em;
+	line-height: 1.5;
+	 font-family: Helvetica, Arial, sans-serif /*{global-font-family}*/;
+}
+
+/*.ui-overlay-a, .ui-page-theme-a, .ui-page-theme-a .ui-panel-wrapper {*/
+    /*background-color: #e4e4e4;*/
+/*}*/
+
+a {
+    color:#333;
+}
+

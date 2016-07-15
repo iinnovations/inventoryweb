@@ -1,0 +1,438 @@
+<?php require_once('auth/user.php'); ?>
+<?php $user->reload_session(); ?>
+<!DOCTYPE html>
+<html>
+<head>
+
+	<title>IIInventory :: Inventory</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"/>
+    <meta charset="utf-8"/>
+
+	<link rel="stylesheet" href="jqm/themes/jqmbasetheme.css" />
+
+    <link rel="stylesheet" href="jqm/themes/jquery.mobile.icons.min.css" />
+    <link rel="stylesheet" href="jqm/jquery.mobile.custom.structure.min.css" />
+    <link rel="stylesheet" href="css/inventory.css" />
+
+	<script src="js/jquery-1.11.0.js"></script>
+    <!--<script src="https://code.jquery.com/jquery-1.7.2.min.js"></script>-->
+
+    <script src="js/jquery-ui-1.11.4.custom/jquery-ui.js"></script>
+    <script src="js/jquery.ui.touch-punch.min.js"></script>
+
+    <!--jQuery Mobile is 1.4.5-->
+	<script src="jqm/jquery.mobile.custom.js"></script>
+
+	<script src="js/iijslib.js"></script>
+    <script src="js/inventoryjslib.js"></script>
+
+</head>
+
+<body>
+	<div data-role="page" id="demo-page" data-theme="d">
+
+<script>
+
+var sessiondata = {};
+sessiondata.username = "<?php if (!empty($_SESSION['user']['name'])) { echo $_SESSION['user']['name'];} ?>";
+sessiondata.sessionid = "<?php if (!empty($_SESSION['user']['sessionid'])) {echo $_SESSION['user']['sessionid'];} ?>";
+sessiondata.appip =  "<?php if (!empty($_SESSION['user']['appip'])) {echo $_SESSION['user']['appip'];} ?>";
+sessiondata.realip =  "<?php if (!empty($_SESSION['user']['realip'])) {echo $_SESSION['user']['realip'];} ?>";
+sessiondata.authlevel =  "<?php if (!empty($_SESSION['user']['authlevel'])) {echo $_SESSION['user']['authlevel'];} ?>";
+sessiondata.hpass =  "<?php if (!empty($_SESSION['user']['hpass'])) {echo $_SESSION['user']['hpass'];} ?>";
+sessiondata.accesskeywords =  "<?php if (!empty($_SESSION['user']['accesskeywords'])) {echo $_SESSION['user']['accesskeywords'];} ?>";
+
+var metastring = "<?php if (!empty($_SESSION['user']['metadata'])) {echo $_SESSION['user']['metadata'];} ?>";
+sessiondata.usermeta = stringJSONparse(metastring);
+
+
+var paneloptions = {};
+var stockdata = [];
+
+var uisettings = {};
+var filteritems = ['status', 'qtystatus', 'supplier', 'manufacturer', 'type'];
+var filternames = ['Status', 'QtyStatus', 'Supplier', 'Manufacturer', 'Type' ];
+
+// So we can do this in the browser, which brings all data to the browser, but allows quicker filter revisions
+// Or we can filter on the server, which minimizes data sent to the browser, but makes revision of filters slower
+// due to having to fetch it every time.
+
+var filtermethod = 'browser';
+
+
+function uiInit() {
+    // This is where we will get this stuff from the uisettings table
+    uisettings = {stockstatusfilter:'active', stockqtystatusfilter:'all', stocksupplierfilter:'all', stockmanufacturerfilter:'all', stocktypefilter:'all'}
+}
+
+function uiRefresh() {
+    // This function runs just to fresh front panel settings from the uisettings object.
+    // We can use this to refresh after creating the filter elements
+    // The filter elements have to be recreated and populated every time the stock is updated, so they cannot
+    // be static.
+
+    for (var i=0;i<filteritems.length; i++) {
+        var filteritem = filteritems[i];
+        var propertyname ='stock' + filteritem + 'filter';
+//        console.log(propertyname)
+        if (uisettings.hasOwnProperty(propertyname)) {
+            var propertyvalue = uisettings[propertyname];
+//            console.log(propertyname + ' : ' + uisettings[propertyname]);
+            $('#' + filteritem + 'filterjqmselect').val(propertyvalue);
+            $('#' + filteritem + 'filterjqmselect').selectmenu('refresh');
+        }
+    }
+}
+
+function uiSettingsGet(){
+
+    for (var i=0;i<filteritems.length; i++) {
+        var filteritem = filteritems[i];
+        var propertyname ='stock' + filteritem + 'filter';
+        if (uisettings.hasOwnProperty(propertyname)) {
+
+            var currentvalue = $('#' + filteritem + 'filterjqmselect').val();
+//            console.log(currentvalue)
+//            console.log(propertyname)
+            uisettings[propertyname] = currentvalue
+        }
+        else{
+            console.log('ERROR with uisettings value ' + propertyname)
+        }
+    }
+//    console.log(uisettings)
+}
+
+function updateSessionDataFields(){
+    $('#appiptext').html(sessiondata.appip);
+    $('#realiptext').html(sessiondata.realip);
+    $('#authleveltext').html(sessiondata.authlevel);
+    $('#accesskeywordstext').html(sessiondata.accesskeywords);
+    var metatext = '';
+    $.each(sessiondata.usermeta, function(property,value) {
+        metatext += property + ' : ' + value + ', ';
+    });
+    metatext = metatext.slice(0,-2);
+    $('#usermetatext').html(metatext);
+}
+
+
+
+
+$(document).ready(function(){
+
+    // This just loads up uisettings for use elsewhere.
+    uiInit();
+    $('#pathalias').html(sessiondata.usermeta.pathalias)
+    $(".addtip").attr('title', 'Add an item');
+    $(".copytip").attr('title', 'Copy an item');
+    $(".deletetip").attr('title', 'Delete an item');
+    $(".edittip").attr('title', 'Edit an item');
+    $(".importtip").attr('title', 'Import from .csv');
+    $(".cleartip").attr('title', 'Clear filters');
+    updateSessionDataFields();
+
+})
+
+</script>
+    <!-- /header -->
+    <div data-role="header" >
+        <h1>IIInventory</h1>
+        <a href="#nav-panel" data-icon="bars" data-theme="e" data-iconpos="notext">Menu</a>
+        <a href="#settings" data-icon="gear" data-theme="e" data-iconpos="notext">Settings</a>
+    </div>
+    <!-- /header -->
+
+    <div data-role="content" class="ui-content-main" style="min-height:600px">
+            <div role="main" class="ui-content content-one" id="content-one">
+                <ul data-role="listview" id="selectionsoptionslistview" data-inset="true" >
+                    <li data-role="list-divider">Session Data</li>
+                        <?php
+                    if($user->logged_in()):
+                    ?>
+                    <li>
+                        <div class="ui-grid-a" style="padding-top:0;margin-top:0;border-top:none">
+                            <div class="ui-block-a">Logged in as: </div>
+                            <div class="ui-block-b"><?php echo $_SESSION['user']['name']; ?></div>
+                        </div>
+                    </li>
+                    <li>
+                        <div class="ui-grid-a lidivgrid">
+                            <div class="ui-block-a">App IP: </div>
+                            <div class="ui-block-b" id="appiptext">&nbsp;</div>
+                        </div>
+                    </li>
+                    <li>
+                        <div class="ui-grid-a lidivgrid">
+                            <div class="ui-block-a">Real IP: </div>
+                            <div class="ui-block-b" id="realiptext">&nbsp;</div>
+                        </div>
+                    </li>
+                    <li>
+                        <div class="ui-grid-a lidivgrid">
+                            <div class="ui-block-a">Auth Level: </div>
+                            <div class="ui-block-b" id="authleveltext">&nbsp;</div>
+                        </div>
+                    </li>
+                    <li>
+                        <div class="ui-grid-a lidivgrid">
+                            <div class="ui-block-a">Access keywords: </div>
+                            <div class="ui-block-b" id="accesskeywordstext">&nbsp;</div>
+                        </div>
+                    </li>
+                    <li>
+                        <div class="ui-grid-a lidivgrid">
+                            <div class="ui-block-a">Usermeta: </div>
+                            <div class="ui-block-b" id="usermetatext">&nbsp;</div>
+                        </div>
+                    </li>
+
+                        <li><a data-ajax="false" href="/auth/logoutmobile">Log out</a></li>
+                        <?php
+                    endif;
+                    if(!$user->logged_in()):
+                    ?>
+                        <li><div class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0.7em">Not logged in</div></li>
+                        <li><a data-ajax="false" href="/auth/loginmobile" style="padding-right:10px">Log in</a></li>
+                    <?php
+                        endif;
+                    ?>
+                </ul>
+
+            </div>
+            <div role="main" class="ui-content content-two" style="height:750px;">
+                <ul data-role="listview" data-inset="true" style="width:99%; border:solid; border-width:0 0.1em; border-color:#AAA">
+                    <li data-role="list-divider">Our Simple Inventory</li>
+                    <li id="textcontent">
+                        <h2>Hello There.</h2>
+                        <p>Welcome to our simple inventory system. It designed to help you order, build, assemble,
+                        and price things.</p>
+                        <h2>Try it</h2>
+                        <p>Username: demo<br />Password: demo</p>
+                        <h2>What it is designed for</h2>
+                        <p>We use it primarily to build panels, electronics assemblies, and other manufactured
+                        goods. We use the <a href="http://octopart.com">Octopart</a> data search engine to help fill in parts data.</p>
+                        <li data-role="list-divider">Workflow</li>
+                        <li>
+                            <p>We shall provide more detail with built-in help. For now, it's pretty simple:</p>
+                        <ol data-role="listview" class="smallinsetlist">
+                            <li>Create a stock library of parts</li>
+                            <li>Take an inventory of current stock levels</li>
+                            <li>Create BOMs from stock library parts</li>
+                            <li>Create assemblies and execute them to reserve parts</li>
+                            <li>Create parts orders by vendor automatically from available and reserved stock</li>
+                            <li>Execute stock orders with order details</li>
+                            <li>Mark orders as received as parts arrive</li>
+                            <li>Complete assemblies by physically taking parts from inventory and marking as complete to
+                                deduct items from inventory</li>
+                        </ol>
+                        <p>That is ... pretty much it for now</p>
+                        </li>
+                    </li>
+                </ul>
+            </div>
+	    <div role="main" class="ui-content content-full" >
+            Nothing here.
+        </div>
+    </div><!-- /content -->
+
+    <!-- Popups -->
+
+    <!-- Add/Edit Items -->
+    <div data-role="popup" id="addedititempopup" data-overlay-theme="a" data-theme="b" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="b" class="ui-corner-top ui-dialog-header">
+            <h3>Add/Edit Item</h3>
+        </div>
+        <div data-role="content" data-theme="a" class="ui-corner-bottom ui-dialog-content addedititempopupcontent">
+            <input type="hidden" id="addeditoriginalpartid" />
+
+            <label for="addeditpartid">PartID</label>
+            <input type="text" name="addeditpartid" id="addeditpartid" value=""  />
+
+            <label for="addeditdescription">Description</label>
+            <textarea name="addeditdescription" id="addeditdescription" value="" style="height:100px; vertical-align:text-top"></textarea>
+
+            <label for="addeditnotes">Notes</label>
+            <input type="text" name="addeditnotes" id="addeditnotes" value=""  />
+
+            <label for="addeditmanufacturer">MFR</label>
+            <input type="text" name="addeditmanufacturer" id="addeditmanufacturer" value=""  />
+
+            <label for="addeditmanufacturerpart">MFR PN</label>
+            <input type="text" name="addeditmanufacturerpart" id="addeditmanufacturerpart" value=""  />
+
+            <label for="addeditsupplier">Supplier</label>
+            <input type="text" name="addeditsupplier" id="addeditsupplier" value=""  />
+
+            <label for="addeditsupplierpart">Supp PN</label>
+            <input type="text" name="addeditsupplierpart" id="addeditsupplierpart" value=""  />
+
+            <label for="addeditcost">Cost</label>
+            <input type="text" name="addeditcost" id="addeditcost" value=""  />
+
+            <div class="ui-grid-a" style="padding-top:0; margin-top:0; border:none">
+                <div class="ui-block-a">
+                    <label for="addeditcostqty">Cost Quantity</label>
+                    <input type="text" name="addeditcostqty" id="addeditcostqty" value=""  />
+                </div>
+                <div class="ui-block-b">
+                    <label for="addeditcostqtyunit">Cost Unit</label>
+                    <input type="text" name="addeditcostqtyunit" id="addeditcostqtyunit" value=""  />
+                </div>
+            </div>
+            <div class="ui-grid-a" style="padding-top:0; margin-top:0; border:none">
+                <div class="ui-block-a">
+                    <label for="addedittype">Item Type</label>
+                    <select name="addedittype" id="addedittype" data-mini="true">
+                        <option value="parts">parts</option>
+                        <option value="labor">labor</option>
+                    </select>
+                </div>
+                <div class="ui-block-b">
+                    <label for="addeditinventory">Inventory</label>
+                    <select name="addeditinventory" id="addeditinventory" data-mini="true">
+                        <option value="std">Std</option>
+                        <option value="none">None</option>
+                    </select>
+                </div>
+            </div>
+            <a href="#" data-role="button" id="addsubmit" style="margin-top:30px">Add/Edit Part</a>
+        </div>
+    </div>
+
+    <!-- Delete items -->
+    <div data-role="popup" id="deleteitemspopup" data-overlay-theme="a" data-theme="d" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="d" class="ui-corner-top ui-dialog-header">
+            <h3>Delete items?</h3>
+        </div>
+        <div data-role="content" id="deleteitempopupcontent" data-theme="a" class="ui-corner-bottom ui-dialog-content addedititempopupcontent">
+            <a href="#" data-role="button" id="deletesubmit" style="margin-top:30px">Add Part</a>
+        </div>
+    </div>
+
+    <!--/Popups -->
+    <!-- Panels -->
+    <style>
+        .nav-search .ui-btn-up-a {
+            background-image:none;
+            background-color:#333333;
+        }
+        .nav-search .ui-btn-inner {
+            border-top: 1px solid #888;
+            border-color: rgba(255, 255, 255, .1);
+        }
+    </style>
+
+    <div data-role="panel" data-position="left" data-position-fixed="false" data-display="reveal" id="nav-panel" data-theme="a">
+        <ul data-role="listview" data-theme="a" data-divider-theme="a" style="margin-top:-16px;" class="nav-search">
+            <li data-icon="delete" style="background-color:#111;">
+                <a href="#" data-rel="close">Close menu</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="stock.html" data-ajax="false">Stock</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="inventories.html" data-ajax="false">Inventories</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="boms.html" data-ajax="false">Bill of Materials</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="assemblies.html" data-ajax="false">Assemblies</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="ordering.html" data-ajax="false">Ordering</a>
+            </li>
+        </ul>
+        <!-- panel content goes here -->
+    </div><!-- /panel -->
+
+    <style>
+        .userform { padding:.8em 1.2em; }
+        .userform h2 { color:#555; margin:0.3em 0 .8em 0; padding-bottom:.5em; border-bottom:1px solid rgba(0,0,0,.1); }
+        .userform label { display:block; margin-top:1.2em; }
+        .switch .ui-slider-switch { width: 6.5em !important }
+        .ui-grid-a { margin-top:1em; padding-top:.8em; margin-top:1.4em; border-top:1px solid rgba(0,0,0,.1); }
+    </style>
+
+    <div data-role="panel" data-position="right" data-position-fixed="false" data-display="overlay" id="settings" data-theme="b">
+
+            <ul data-role="listview" data-theme="a" data-divider-theme="a" style="margin-top:-16px;" class="nav-search">
+
+                <li data-icon="delete" style="background-color:#111;">
+                    <a href="#" data-rel="close">Close menu</a>
+                </li>
+
+                <?php
+                if($user->logged_in()):
+                ?>
+
+                    <li><div class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0.7em"><?php echo $_SESSION['user']['name']; ?></div></li>
+                    <li><a data-ajax="false" href="/auth/logoutmobile">Log out</a></li>
+                    <?php
+                endif;
+                if(!$user->logged_in()):
+                ?>
+                    <li><div class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0.7em">Not logged in</div></li>
+                    <li><a data-ajax="false" href="/auth/loginmobile" style="padding-right:10px">Log in</a></li>
+                <?php
+                    endif;
+                ?>
+                <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                    <a href="auth/manage.php">Manager user</a>
+                </li>
+
+            </ul>
+        <!-- panel content goes here -->
+    </div><!-- /panel -->
+
+    <style>
+        .userform { padding:.8em 1.2em; }
+        .userform h2 { color:#555; margin:0.3em 0 .8em 0; padding-bottom:.5em; border-bottom:1px solid rgba(0,0,0,.1); }
+        .userform label { display:block; margin-top:1.2em; }
+        .switch .ui-slider-switch { width: 6.5em !important }
+        .ui-grid-a { margin-top:1em; padding-top:.8em; margin-top:1.4em; border-top:1px solid rgba(0,0,0,.1); }
+    </style>
+
+    <div data-role="panel" data-position="right" data-position-fixed="false" data-display="overlay" id="settings" data-theme="b">
+
+        <!--<form class="userform">-->
+        <ul data-role="listview" data-theme="a" data-divider-theme="a" style="margin-top:-16px;" class="nav-search">
+
+            <li data-icon="delete" style="background-color:#111;">
+                <a href="#" data-rel="close">Close menu</a>
+            </li>
+
+            <?php
+            if($user->logged_in()):
+            ?>
+
+                <li><div class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0"><?php echo $_SESSION['user']['name']; ?></div></li>
+                <li><div id="pathalias" class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0">&nbsp;</div></li>
+                <li><a data-ajax="false" href="/auth/logoutmobile">Log out</a></li>
+                <?php
+            endif;
+            if(!$user->logged_in()):
+            ?>
+                <li><div class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0.7em">Not logged in</div></li>
+                <li><a data-ajax="false" href="/auth/loginmobile" style="padding-right:10px">Log in</a></li>
+            <?php
+                endif;
+            ?>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="auth/manage.php">Manage user</a>
+            </li>
+
+        </ul>
+
+        <!-- panel content goes here -->
+    </div><!-- /panel -->
+    <!-- /Panels -->
+
+	<div data-role="footer" data-theme="d">
+		<div class="footertext">Copyright 2016 Interface Innovations</div>
+	</div><!-- /footer -->
+</div><!-- /page -->
+
+</body>
+</html>

@@ -1,0 +1,1157 @@
+<?php require_once('auth/user.php'); ?>
+<?php $user->require_login(); ?>
+<?php $user->reload_session(); ?>
+<!DOCTYPE html>
+<html>
+<head>
+
+	<title>IIInventory :: BOMs</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"/>
+    <meta charset="utf-8"/>
+
+	<link rel="stylesheet" href="jqm/themes/jqmbasetheme.css" />
+
+    <link rel="stylesheet" href="jqm/themes/jquery.mobile.icons.min.css" />
+    <link rel="stylesheet" href="jqm/jquery.mobile.custom.structure.min.css" />
+    <link rel="stylesheet" href="css/inventory.css" />
+
+	<script src="js/jquery-1.11.0.js"></script>
+    <!--<script src="https://code.jquery.com/jquery-1.7.2.min.js"></script>-->
+
+    <script src="js/jquery-ui-1.11.4.custom/jquery-ui.js"></script>
+    <script src="js/jquery.ui.touch-punch.min.js"></script>
+
+    <!--jQuery Mobile is 1.4.5-->
+	<script src="jqm/jquery.mobile.custom.js"></script>
+	<script src="js/iijslib.js"></script>
+    <script src="js/inventoryjslib.js"></script>
+
+</head>
+
+<body>
+	<div data-role="page" id="demo-page" data-theme="d">
+
+<script>
+
+var sessiondata = {};
+sessiondata.username = "<?php if (!empty($_SESSION['user']['name'])) { echo $_SESSION['user']['name'];} ?>";
+sessiondata.sessionid = "<?php if (!empty($_SESSION['user']['sessionid'])) {echo $_SESSION['user']['sessionid'];} ?>";
+sessiondata.appip =  "<?php if (!empty($_SESSION['user']['appip'])) {echo $_SESSION['user']['appip'];} ?>";
+sessiondata.realip =  "<?php if (!empty($_SESSION['user']['realip'])) {echo $_SESSION['user']['realip'];} ?>";
+sessiondata.authlevel =  "<?php if (!empty($_SESSION['user']['authlevel'])) {echo $_SESSION['user']['authlevel'];} ?>";
+sessiondata.hpass =  "<?php if (!empty($_SESSION['user']['hpass'])) {echo $_SESSION['user']['hpass'];} ?>";
+sessiondata.accesskeywords =  "<?php if (!empty($_SESSION['user']['accesskeywords'])) {echo $_SESSION['user']['accesskeywords'];} ?>";
+
+var metastring = "<?php if (!empty($_SESSION['user']['metadata'])) {echo $_SESSION['user']['metadata'];} ?>";
+sessiondata.usermeta = stringJSONparse(metastring);
+
+var stockdata = [];
+
+var allbomsdata = [];
+var filteredbomsdata = [];
+
+var bomsviewdata = {};
+var activebomdata = {};
+
+var uisettings = {};
+var filteritems = ['status'];
+var filternames = ['Status'];
+var bompartitems = ['partid', 'description', 'notes', 'manufacturer', 'manufacturerpart', 'supplier',
+            'supplierpart', 'cost', 'costqty', 'costqtyunit', 'type', 'inventory', 'qty']
+
+// So we can do this in the browser, which brings all data to the browser, but allows quicker filter revisions
+// Or we can filter on the server, which minimizes data sent to the browser, but makes revision of filters slower
+// due to having to fetch it every time.
+
+var filtermethod = 'browser';
+
+function filterBOMsData(data) {
+    var tempfiltereddata = []
+    for (var j=0;j<data.length;j++) {
+        var datum = data[j];
+
+        var keepdatum=true;
+        if (datum.name == 'metadata') {
+            keepdatum=false
+        }
+        else {
+            for (var i = 0; i < filteritems.length; i++) {
+                var filteritem = filteritems[i];
+                var propertyname = 'bom' + filteritem + 'filter';
+                if (uisettings.hasOwnProperty(propertyname)) {
+                    var propertyvalue = uisettings[propertyname];
+                    if (['all', 'All'].indexOf(propertyvalue) < 0) {
+                        //                    console.log('is not all. Is ' + propertyvalue)
+                        if (datum[filteritem] == propertyvalue) {
+                            //                        console.log('property match for part ' + datum.status + ' with value ' + datum[filteritem])
+                        }
+                        else {
+                            keepdatum = false
+                        }
+                    }
+                }
+            }
+        }
+        if (keepdatum) {
+            tempfiltereddata.push(datum)
+        }
+    }
+    return tempfiltereddata;
+}
+
+function filterBOMItemsData(data){
+    var filtereddata = data;
+    return filtereddata;
+}
+
+function uiInit() {
+    // This is where we will get this stuff from the uisettings table
+    uisettings = {bomstatusfilter: 'active', activebomname:'samplebom'};
+
+    // In thise case, we can render here because it is a static html element
+    $('#bomstatusfilterjqmselect').val(uisettings.bomstatusfilter)
+//    $('#bomstatusfilterjqmselect').selectmenu('refresh')
+
+}
+
+function uiRefresh() {
+    // This function runs just to fresh front panel settings from the uisettings object.
+    // We can use this to refresh after creating the filter elements
+    // The filter elements have to be recreated and populated every time the stock is updated, so they cannot
+    // be static.
+
+    for (var i=0;i<filteritems.length; i++) {
+        var filteritem = filteritems[i];
+        var propertyname ='stock' + filteritem + 'filter';
+//        console.log(propertyname)
+        if (uisettings.hasOwnProperty(propertyname)) {
+            var propertyvalue = uisettings[propertyname];
+//            console.log(propertyname + ' : ' + uisettings[propertyname]);
+            $('#' + filteritem + 'filterjqmselect').val(propertyvalue);
+            $('#' + filteritem + 'filterjqmselect').selectmenu('refresh');
+        }
+    }
+
+    // Mark active BOM
+    var activeindex=0;
+    if (bomsviewdata.names.indexOf(uisettings.activebomname) > 0 ){
+        activeindex = bomsviewdata.names.indexOf(uisettings.activebomname)
+    }
+    else { // this should never happen
+        // This will actually happen if the uisettings 'activebomname' is set to the name of a bom that does not exist
+        activeindex = 0;
+        uisettings.activebomname = bomsviewdata.names[activeindex];
+    }
+    activebomdata.metadata = bomsviewdata.metadata[activeindex];
+    $('#bomdetails').html('Cost: $' + setprecision(activebomdata.metadata.cost,2) + ', Price: $' +
+            setprecision(activebomdata.metadata.price,2));
+
+    $('.bomlistitem').each(function(){
+        var selector = $(this)
+        selector.removeClass('activebomitem');
+        var index = selector.prop('id').split('_')[1]
+        // get index and see if it is selected after all
+        if (index == activeindex) {
+//            console.log('FOUND ACTIVE ITEM')
+            selector.addClass('activebomitem')
+
+        }
+    });
+}
+
+function uiSettingsGet(){
+
+    for (var i=0;i<filteritems.length; i++) {
+        var filteritem = filteritems[i];
+        var propertyname ='bom' + filteritem + 'filter';
+        if (uisettings.hasOwnProperty(propertyname)) {
+            var currentvalue = $('#' + filteritem + 'filterjqmselect').val();
+            uisettings[propertyname] = currentvalue
+        }
+        else{
+            console.log('ERROR with uisettings value ' + propertyname)
+        }
+    }
+    console.log(uisettings)
+}
+
+function populateAddEditItem(item, renderitems){
+    renderitems = renderitems || bompartitems;
+    for (var i=0;i<renderitems.length;i++){
+        var renderitem = renderitems[i];
+        var selector = $('#addedititem' + renderitem);
+        selector.val(item[renderitem]);
+        if (selector.is("select")) {
+            selector.selectmenu('refresh')
+        }
+    }
+}
+
+function getSelectedListItems(classname, refarray) {
+    // What we are doing here is iterating over classes of a checkbox,
+    // and when it is checked, returning the items that are indexed in refarray
+    // So if checkbox array is rendered into list from refarray, the checked box at the nth position
+    // corresponds to the full entry at refarray.
+    // We then take the element at refarray, at an 'index' property, and return it
+
+    var selecteditems = [];
+    var index = 0;
+    $('.' + classname).each(function(){
+        if ($(this).prop('checked')) {
+            var id = $(this).attr('id');
+            console.log(id);
+            index = id.split('_')[1];
+            var item = refarray[index];
+            item['index'] = index;
+            selecteditems.push(item)
+        }
+    });
+    return selecteditems
+}
+
+function addEditBOMSubmit(){
+
+    var bomdata = {};
+    var valuelist = ['name', 'originalname', 'notes']
+    for (var i=0; i<valuelist.length; i++) {
+        bomdata[valuelist[i]] = $('#bomaddeditpopup' + valuelist[i]).val()
+    }
+    addEditBOM({bomdata:bomdata});
+}
+
+function addEditBOMPartSubmit(){
+
+    console.log(bompartitems)
+    // get data from the form
+    var bompartdata = {};
+    for (var i=0; i<bompartitems.length; i++) {
+        bompartdata[bompartitems[i]] = $('#addedititem' + bompartitems[i]).val()
+    }
+//    console.log(bompartdata)
+    addEditBOMPart({bomname:activebomdata.metadata.name, partdata:bompartdata});
+}
+
+function renderBOMsResponse (response,options) {
+
+    var timeout = 0
+    // Set interval function. We either pass a class to retrieve it from,
+    // a static value, or nothing
+    if (options.hasOwnProperty('timeoutclass')) {
+        timeout = $('.' + options.timeoutclass).val() * 1000;
+    }
+    else if (options.hasOwnProperty('timeout')) {
+        timeout = options.timeout;
+    }
+    if (timeout > 0) {
+        setTimeout(function () {
+            getAndRenderBOMs(options)
+        }, timeout);
+    }
+    if (response.hasOwnProperty('data')) {
+        allbomsdata = response.data;
+        // do all the filtering and sorting in the render routine
+    }
+    else {
+        console.log('no data returned.')
+    }
+    renderBOMsTable(allbomsdata);
+//    console.log(bomsdata)
+}
+
+function renderBOMsTable(bomsdata){
+    var htmlstring = '';
+    bomsdata = bomsdata || allbomsdata;
+
+    // Now we filter and sort it
+    // Filter
+    if (filtermethod == 'browser') {
+        filteredbomsdata = filterBOMsData(bomsdata);
+    }
+
+    // sort by name
+    filteredbomsdata.sort(function(a, b) {
+        return (a.name > b.name) ? 1 : ((b.name > a.name) ? -1 : 0)
+    });
+
+    var bomnames = [];
+    for (var i=0;i<filteredbomsdata.length;i++) {
+        bomnames.push(filteredbomsdata[i].name)
+    }
+    bomsviewdata.names=bomnames;
+    bomsviewdata.metadata=filteredbomsdata;
+
+    //rerendered, so rerender metadata
+
+
+//    console.log('filtereddata is of length: ' + filtereddata.length)
+    // Sort the data. We do this in js because we want to be able to change it on the fly
+
+
+    for (var i=0;i<filteredbomsdata.length;i++){
+        var item = filteredbomsdata[i];
+//        console.log(item)
+        htmlstring += '' +
+        '<li class="bomlistitem" id="bomlistitem_' + i + '">' +
+            '<table><tr>' +
+                '<td class="bomitemcbtd">' +
+                    '<input  type="checkbox" name="listitem' + i + '" class="bomlistitemcb" id="bomlistitemcb_' + i + '">' +
+                '</td>'+
+                '<td>' +
+                    '<div class="itembuttondiv edittip"><a href="#bomaddeditpopup" class="bomeditbutton" id="bomditbutton_' + i + '" data-theme="f"  data-rel="popup" data-role="button" data-icon="edit" data-iconpos="notext">Edit</a></div>' +
+                '</td>' +
+                '<td style="text-align:left; width:175px; padding-left:2em" id="bomname_' + i + '">' +
+                    item.name +
+                '</td>' +
+                '<td style="text-align:left; width:50px" id="bomcount_' + i + '">' +
+                    item.itemcount +
+                '</td>' +
+            '</tr></table>' +
+        '</li>'
+    }
+    htmlstring += '<li class="lastli">&nbsp;</li>'
+//    console.log(htmlstring)
+    $('#bomslistview').html(htmlstring);
+    $('#bomslistview').trigger('create');
+
+    $('.bomeditbutton').click({},function(event){
+        // Use the id of the button that was clicked to populate the addedit window
+
+        var id = event.target.id;
+        var index = id.split('_')[1]
+//        console.log('index ' + index + ' selected.')
+        var itemmeta = filteredbomsdata[index];
+
+        // Render data into item edit window
+        $('#bomaddeditpopupname').val(itemmeta.name);
+        $('#bomaddeditpopuporiginalname').val(itemmeta.name);
+        $('#bomaddeditpopupnotes').val(itemmeta.notes)
+
+    });
+
+
+    $('.bomlistitem').click(function(){
+        var selector = $(this)
+        var index = selector.prop('id').split('_')[1];
+        activebomdata.index = index;
+        activebomdata.metadata = bomsviewdata.metadata[index];
+        uisettings.activebomname = bomsviewdata.names[index];
+
+        getAndRenderSelectedBOM();
+        uiRefresh()
+    });
+    uiRefresh();
+
+    getAndRenderSelectedBOM();
+//    renderSelectionTable({inventory:stockdata});
+}
+
+function renderBOMResponse(response) {
+    if (response.hasOwnProperty('data')) {
+        activebomdata.items = response.data;
+        renderSelectedBOM(activebomdata)
+    }
+}
+
+function renderSelectedBOM(data){
+
+    // we take the entire thing so we can render the metadata as well
+    data = data || activebomdata;
+
+    var htmlstring = '';
+    var itemlistitems = ['partid', 'description', 'qty', 'cost', 'totalcost', 'type', 'margin', 'price', 'totalprice', 'supplier'];
+    var itemlistnames = ['partid', 'description', 'qty', 'cost', 'total cost', 'type', 'margin', 'price', 'totalprice', 'supplier'];
+    var itemlistwidths = [45,          160,        50,     50,     60,          60,       50,      50,        50,          125];
+
+    var filtereddata = [];
+
+    // We should actually move this filtering above so that when we search through the data, we don't get stuff
+    // that has been filtered and/or sorted
+
+    if (filtermethod == 'browser') {
+        filtereddata = filterBOMItemsData(data.items);
+    }
+    else {
+        // to be fixed ...
+        filtereddata = data;
+    }
+    // Sort the data. We do this in js because we want to be able to change it on the fly
+    filtereddata.sort(function(a, b) {
+        return (a.partid > b.partid) ? 1 : ((b.partid > a.partid) ? -1 : 0)
+    });
+
+    // Let's make a list of descriptions
+    htmlstring += '<li class="headerrow"><table><tr><td style="width:11%; font-size:10px">';
+    htmlstring += '<div class="ui-block-a " style="width:40px; ">'+
+                  '<input  type="checkbox" name="bomselectallcb" style="margin-left:-0.3125em" class="bomselectallcb bompartslistitemcb" id="bomselectallcb">' +
+                  '</div></li>';
+    for (var j=0;j<itemlistitems.length;j++){
+        htmlstring += '<td style="text-align:center; width:' + itemlistwidths[j] +'px">' + itemlistnames[j] + '</td>'
+    }
+    htmlstring += '</tr></table></li>';
+    for (var i=0;i<filtereddata.length;i++){
+        var stockitem = filtereddata[i];
+//        console.log(stockitem)
+        htmlstring += '' +
+        '<li class="selectionitem">' +
+            '<table><tr>' +
+                '<td class="bompartslistitemcbtd">' +
+                    '<input  type="checkbox" name="listitem' + i + '" class="bompartslistitemcb" id="bompartslistitemcb_' + i + '">' +
+                '</td>'+
+                '<td>' +
+                    '<div class="itembuttondiv edittip"><a href="#addedititempopup" class="listitemeditbutton" id="stockitemeditbutton_' + i + '" data-theme="f"  data-rel="popup" data-role="button" data-icon="edit" data-iconpos="notext">Edit</a></div>' +
+                '</td>';
+
+
+        for (var j=0;j<itemlistitems.length;j++) {
+//            console.log(stockitem[j])
+            htmlstring += '<td style="text-align:center; width:' + itemlistwidths[j] +'px" id="item' + j + stockitem[j] + '">' +
+                    stockitem[itemlistitems[j]] +
+                '</td>'
+        }
+        htmlstring +='</tr></table></li>'
+    }
+
+    htmlstring += '<li class="lastli">&nbsp;</li>'
+//    console.log(htmlstring)
+    $('#itemslist').html(htmlstring);
+    $('#itemslist').trigger('create');
+
+    // Throw in some data
+//    $('#bomdetails').html('Cost: $' + activebomdata.metadata.cost + ', Price: $' + activebomdata.metadata.price)
+
+    $('.listitemeditbutton').click({},function(event){
+        // Use the id of the button that was clicked to populate the addedit window
+
+        var id = event.target.id;
+        var index = id.split('_')[1]
+//        console.log('index ' + index + ' selected.')
+        var item = activebomdata.items[index]
+        // Render data into item edit window
+        populateAddEditItem(item);
+
+    });
+    $('.listitemcopybutton').click({},function(event){
+        var id = event.target.id;
+        var index = id.split('_')[1]
+        var item = stockdata[index]
+        var partdata = {partid:item['partid']}
+        copyPart({partdata:partdata})
+    });
+    $('#bomselectallcb').change(function(){
+        console.log($('#bomselectallcb').prop('checked'))
+        var state = false;
+        if ($('#bomselectallcb').prop('checked')) {
+            state = true
+        }
+        $('.bompartslistitemcb').prop('checked',state);
+    });
+}
+
+function renderStockResponse (response,options) {
+
+    var timeout = 0
+    // Set interval function. We either pass a class to retrieve it from,
+    // a static value, or nothing
+    if (options.hasOwnProperty('timeoutclass')) {
+        timeout = $('.' + options.timeoutclass).val() * 1000;
+    }
+    else if (options.hasOwnProperty('timeout')) {
+        timeout = options.timeout;
+    }
+    if (timeout > 0) {
+        setTimeout(function () {
+            getAndRenderStock(options)
+        }, timeout);
+    }
+    if (response.hasOwnProperty('data')) {
+        // Here we filter and sort as soon as we get the data. This is as opposed to
+        // stock page, where we keep a copy of the unfiltered data around. This may change, but probably not
+        response.data = filterStockData(response.data);
+
+        response.data.sort(function(a, b) {
+        return (a.partid > b.partid) ? 1 : ((b.partid > a.partid) ? -1 : 0)
+        });
+        stockdata = response.data;
+    }
+    else {
+        console.log('no data returned.')
+    }
+    renderStockTable(stockdata);
+}
+
+function renderStockTable(renderstockdata){
+    renderstockdata = renderstockdata || stockdata;
+
+    var htmlstring = '';
+    var itemlistitems = ['partid', 'description', 'qtyavailable', 'cost', 'supplier'];
+    var itemlistnames = ['partid', 'description', 'avail', 'cost', 'supplier'];
+    var itemlistwidths = [40, 160, 50, 50, 50, 50, 50, 100];
+
+    // Let's make a list of descriptions
+    htmlstring += '<li class="headerrow"><table><tr><td style="width:80px; font-size:10px">';
+    for (var j=0;j<itemlistitems.length;j++){
+        htmlstring += '<td style="text-align:center; width:' + itemlistwidths[j] +'px">' + itemlistnames[j] + '</td>'
+    }
+    htmlstring += '</tr></table></li>';
+    for (var i=0;i<renderstockdata.length;i++){
+        var stockitem = renderstockdata[i];
+//        console.log(stockitem)
+        htmlstring += '' +
+        '<li class="selectionitem">' +
+            '<table><tr>' +
+                '<td class="stockitemcbtd" style="width:7%!important">' +
+                    '<input  type="checkbox" name="stocklistitem' + i + '" class="stocklistitemcb" id="stocklistitemcb_' + i + '">' +
+                '</td>' +
+                '<td class="stockitemnumbertd">' +
+                    '<input type="number" value="1" name="stocklistitem' + i + '" class="stocklistitemnumber" id="stocklistitemnumber_' + i + '">' +
+                '</td>';
+
+        for (var j=0;j<itemlistitems.length;j++) {
+            htmlstring += '<td style="text-align:center; width:' + itemlistwidths[j] +'px" id="item' + j + stockitem[j] + '">' +
+                    stockitem[itemlistitems[j]] +
+                '</td>'
+        }
+        htmlstring +='</tr></table>' +
+        '</li>'
+    }
+    htmlstring += '<li class="lastli">&nbsp;</li>';
+
+    $('#stockitemslist').html(htmlstring);
+    $('#stockitemslist').trigger('create');
+
+//    renderSelectionTable({inventory:stockdata});
+}
+
+function filterStockData(stockdata) {
+    var filtereddata = []
+
+    for (var i=0;i<stockdata.length;i++){
+        if (stockdata[i].status == 'active'){
+            filtereddata.push(stockdata[i])
+        }
+    }
+    return filtereddata
+}
+
+function renderBOMCalcs(response, options){
+
+    var htmlstring = '<ul data-role="listview">';
+    var totalsstring = '';
+    var partsstring = '';
+    var laborstring = '';
+    var otherstring = '';
+    console.log(response);
+
+    // reform to sort
+    var properties = [];
+    $.each(response.data, function(property,value) {
+        properties.push({name:property, value:value})
+    });
+
+    properties.sort(function(a, b) {
+        return (a.name > b.name) ? 1 : ((b.name > a.name) ? -1 : 0)
+    });
+    function makeliststring(item) {
+        var liststring = '<li><div class="ui-grid-a" style="width:100%;padding:0.1em 0 0 0.4em;border:none;margin-top:0">' +
+                    '<div class="ui-block-a">' + item.name + '</div>' +
+                    '<div class="ui-block-b" style="width:125px;text-align: right">' + setprecision(item.value,2) + '</div>' +
+                    '</div></li>'
+
+        return liststring;
+    }
+    $.each(properties, function(index, item) {
+        if (item.name.search('parts') >= 0) {
+            partsstring += makeliststring(item);
+//            partsstring += '<li><div class="ui-grid-a" style="width:100%;padding:0.1em 0 0 0.4em;border:none;margin-top:0">' +
+//                    '<div class="ui-block-a">' + item.name + '</div>' +
+//                    '<div class="ui-block-b" style="width:125px;text-align: right">' + setprecision(item.value,2) + '</div>' +
+//                    '</div></li>'
+        }
+        if (item.name.search('labor') >= 0) {
+
+            laborstring += makeliststring(item);
+        }
+        if (item.name.search('total') >= 0) {
+            totalsstring += makeliststring(item);
+        }
+        else  {
+            otherstring += makeliststring(item);
+        }
+
+    });
+    htmlstring += "<li data-role='list-divider'>" + 'Parts</li>';
+    htmlstring += partsstring;
+    htmlstring += "<li data-role='list-divider'>" + 'Labor</li>';
+    htmlstring += laborstring;
+    htmlstring += "<li data-role='list-divider'>" + 'Other</li>';
+    htmlstring += otherstring;
+    htmlstring += "<li data-role='list-divider'>" + 'Total</li>';
+    htmlstring += totalsstring;
+
+    htmlstring += '</ul>'
+
+    $('#bomcalcspopup').html(htmlstring).trigger('create')
+}
+
+function refreshSelectedBOMItems(){
+
+    var selecteditems = getSelectedListItems('bompartslistitemcb', activebomdata.items);
+    var partids = [];
+
+    var contentmessage = 'Refreshing items from stockdb: <br /><ul>';
+    for (var i=0;i<selecteditems.length;i++){
+        var partid = selecteditems[i].partid;
+        partids.push(partid);
+        contentmessage += '<li style="border:none; padding:0.1em 0 0.1em 0.4em">' + partid + '</li>'
+    }
+    contentmessage += '</ul>'
+    $('#refreshingbomitempopupcontent').html(contentmessage);
+    var options = {bomname:activebomdata.metadata.name, partids:partids};
+    options.callback = renderBOMsTable;
+    reloadItemDataFromStock(options);
+    console.log(options)
+
+}
+
+
+$(document).ready(function(){
+
+    // This just loads up uisettings for use elsewhere.
+    uiInit();
+
+    $(".addtip").attr('title', 'Add an item');
+    $(".copytip").attr('title', 'Copy an item');
+    $(".deletetip").attr('title', 'Delete an item');
+    $(".edittip").attr('title', 'Edit an item');
+    $(".importtip").attr('title', 'Import from .csv');
+    $(".cleartip").attr('title', 'Clear filters');
+
+    $("#bomaddeditsubmit").click(function(){addEditBOMSubmit()});
+    $(".addedititemsubmit").click(function(){addEditBOMPartSubmit()});
+    $("#addbomitemsbutton").click(function(){
+        // popup also opens
+        getAndRenderStock();
+    });
+    $('#addbomitemspopupadditems').click(function(){
+
+        // Also need to get quantity in here
+        var selecteditems = getSelectedListItems('stocklistitemcb', stockdata);
+
+
+        var numitemsselected = selecteditems.length;
+        if (numitemsselected == 0) {
+            alert('No part selected! ')
+        }
+        else {
+            for (var i=0;i<selecteditems.length;i++) {
+                // The function above actually returns stockdata already, so we could simplify this
+
+                var partdata = stockdata[selecteditems[i].index];
+                var selectorid = '#stocklistitemnumber_' + selecteditems[i].index;
+                console.log(selectorid)
+                var qty = $(selectorid).val();
+                partdata.qty = qty;
+                console.log(qty);
+                addEditBOMPart({bomname:activebomdata.metadata.name, copystock:'missing', partdata:partdata})
+
+            }
+        }
+
+    });
+    $('.bomcopybutton').click({},function(event){
+        var selecteditems = getSelectedListItems('bomlistitemcb', bomsviewdata.metadata)
+        for (var i=0; i<selecteditems.length;i++){
+            var itemmeta = selecteditems[i];
+            console.log(itemmeta)
+            copyBOM({bomname:itemmeta.name})
+        }
+
+    });
+    $('#deletebombutton').click(function(){
+        var selecteditems = getSelectedListItems('bomlistitemcb', bomsviewdata.names);
+        var numitemsselected = selecteditems.length;
+        var contentmessage = '';
+        var bomnamestodelete = [];
+        if (numitemsselected > 0) {
+            console.log(selecteditems)
+            contentmessage = 'You are trying to delete:<br />';
+            for (var i=0;i<selecteditems.length;i++) {
+                bomnamestodelete.push(selecteditems[i]);
+                contentmessage += selecteditems[i] + '<br />';
+            }
+            contentmessage += '<a href="#" data-icon="delete" data-theme="g" data-role="button" id="deletebomsubmit" style="margin-top:30px">Delete BOM(s)</a>'
+        }
+        else {
+            contentmessage = 'No items selected for deletion'
+        }
+        $('#deletebompopupcontent').html(contentmessage);
+        $('#deletebompopupcontent').trigger('create');
+        $('#deletebomsubmit').click(function() {
+            // this is a sacrificial part to ensure that this gets sent in as an array. When there is only
+            // one item, it comes up differently as json.
+            // This actually should be fixed on the server now
+            bomnamestodelete.push('anonexistentbom');
+            deleteBOMs({bomnames: bomnamestodelete});
+            $('#deletebompopup').popup('close');
+        });
+});
+    $('#addbomitemsaddedit').click(function(){
+        // Load entries into add/edit screen
+        // Get index of selected item. If more than one, complain
+        var selecteditems = getSelectedListItems('stocklistitemcb', stockdata);
+        var numitemsselected = selecteditems.length;
+
+        if (numitemsselected == 0) {
+            alert('No part selected! ')
+        }
+        else if (numitemsselected > 1) {
+            alert('Too many parts selected for edit option. \r\n Use Add Multiple ' +
+                    '(other button) or unselect items.' )
+        }
+        else {
+            // populate
+            var index = selecteditems[0].index;
+            populateAddEditItem(stockdata[index]);
+            // Close add item to bom popup
+            $('#addbomitemspopup').popup('close');
+
+            // Open add/edit pop-up
+            setTimeout(function(){$('#addedititempopup').popup('open')}, 200)
+        }
+    });
+
+    // Not done yet. Need to do for both BOMs and BOM items. Ick
+    $("#deletebomitemsbutton").click(function(){
+
+        // Iterate over items to find those selected.
+        var partidstodelete = [];
+        var contentmessage = '';
+
+        var selecteditems = getSelectedListItems('bompartslistitemcb', activebomdata.items);
+        var numitemsselected = selecteditems.length;
+        if (numitemsselected > 0) {
+            console.log(selecteditems)
+            contentmessage = 'You are trying to delete:<br />';
+            for (var i=0;i<selecteditems.length;i++) {
+                partidstodelete.push(selecteditems[i].partid);
+                contentmessage += selecteditems[i].partid + '<br />';
+            }
+            contentmessage += '<a href="#" data-icon="delete" data-theme="g" data-role="button" id="deletebomitemssubmit" style="margin-top:30px">Delete Part(s)</a>'
+        }
+        else {
+            contentmessage = 'No items selected for deletion'
+        }
+        $('#deletebomitempopupcontent').html(contentmessage);
+        $('#deletebomitempopupcontent').trigger('create');
+        $('#deletebomitemssubmit').click(function(){
+            // this is a sacrificial part to ensure that this gets sent in as an array. When there is only
+            // one item, it comes up differently as json.
+            // This actually should be fixed on the server now
+            partidstodelete.push('anonexistentpart');
+            deletePartsFromBOM({partids:partidstodelete, bomname:activebomdata.metadata.name});
+            $('#deletebomitemspopup').popup('close');
+        })
+
+    });
+    $('#bominfobutton').click(function(){
+        console.log('rendering?')
+        var options= {bomname:activebomdata.metadata.name}
+        getAndRenderBOMCalcs(options);
+    });
+
+    $('#refreshbomitemsbutton').click(function(){
+        refreshSelectedBOMItems();
+        setTimeout(function(){
+            $('#refreshingbomitemspopup').popup('close');
+        }, 2000)
+
+    });
+
+    $("#refreshbomsbutton").click(function(){getAndRenderBOMs()});
+
+    $( "#bomaddeditpopup" ).draggable();
+    $( "#addedititempopup" ).draggable();
+    $( "#deleteitemspopup" ).draggable();
+    $( "#addbomitemspopup" ).draggable();
+    $( "#bomcalcspopup" ).draggable();
+
+    setTimeout(function(){$('#addedititempartid').textinput('disable')}, 1000)
+
+//    getAndRenderInventoryList();
+
+    getAndRenderBOMs({timeout:15000000});
+
+})
+
+</script>
+    <!-- /header -->
+    <div data-role="header" >
+        <h1>IIInventory :: BOMs</h1>
+        <a href="#nav-panel" data-icon="bars" data-theme="e" data-iconpos="notext">Menu</a>
+        <a href="#settings" data-icon="gear" data-theme="e" data-iconpos="notext">Add</a>
+    </div>
+    <!-- /header -->
+
+    <div data-role="content" class="ui-content-main" style="min-height:600px">
+            <div role="main" class="ui-content content-one" id="content-one">
+                <ul data-role="listview" id="selectionsoptionslistview" data-inset="true" style="width:99%; border:solid; border-width:0 0.1em; border-color:#AAA; margin-bottom:0; box-shadow:none; -webkit-box-shadow: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0">
+                    <li data-role="list-divider">BOMs</li>
+                    <li style="padding:0.2em 1em; border-width:0 0 0.1em 0; border-color:#777" >
+                        <div class="ui-grid-c" >
+                            <div class="ui-block-a" style="width:40px">
+                                <div class="buttondiv addtip"><a href="#bomaddeditpopup" id='bomaddeditbutton' data-rel="popup" data-theme="f" data-role="button" data-icon="plus" data-iconpos="notext">Add</a></div>
+                            </div>
+                            <div class="ui-block-b" style="width:40px">
+                                <div class="buttondiv deletetip"><a href="#deletebompopup" id='deletebombutton' data-theme="g" data-rel="popup" data-role="button" data-icon="delete" data-iconpos="notext">Delete</a></div>
+                            </div>
+                            <div class="ui-block-c" style="width:40px">
+                                <div class="buttondiv bomcopybutton copytip"><a href="#" id='bomcopybutton' data-theme="f" data-role="button" data-icon="action" data-iconpos="notext">Copy</a></div>
+                            </div>
+                            <div class="ui-block-d" style="width:125px; float:right">
+                                <!--<label for="bomstatusfilterjqmselect">Item Type</label>-->
+                                <select name="bomstatusfilterjqmselect" id="bomstatusfilterjqmselect" class="filterselect" data-mini="true" style="padding:0.25em 1em">
+                                    <option value="all">all</option>
+                                    <option value="active">active</option>
+                                </select>
+                            </div>
+                        </div>
+                    </li>
+                    <li class="headerrow" style="padding:0.4em 0.4em;background-color:#EAEAEA;">
+                        <table>
+                            <tr>
+                                <td style="width:110px">&nbsp;</td>
+                                <td style="width:130px">Name</td>
+                                <td style="width:65px">Count</td>
+                            </tr>
+                        </table>
+                    </li>
+                </ul>
+                <ul data-role="listview" id="bomslistview" class="bomslistview ui-corner-all ui-shadow" data-inset="true" style="width:99%;height:100%;margin-bottom:2em; border:solid; border-width:0 0.1em; border-color:#AAA; border-top-left-radius: 0; border-top-right-radius: 0">
+                    <!--<div id="selectionslist">-->
+                        &nbsp;
+                    <!--</div>-->
+                </ul>
+            </div>
+            <div role="main" class="ui-content content-two" style="height:750px;">
+                <ul data-role="listview" data-inset="true" style="width:99%; border:solid; border-width:0 0.1em; border-color:#AAA; margin-bottom:0; box-shadow:none; -webkit-box-shadow: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0">
+                    <li data-role="list-divider">
+                        <div class="ui-grid-b" style="padding:0; margin:0;width:100%">
+                            <div class="ui-block-a">BOM Contents</div>
+                            <div class="ui-block-b" style="text-align:right"><span id="bomdetails">&nbsp;</span></div>
+                            <div class="ui-block-c" style="width:25px">
+                                 <div class="itembuttondiv addtip" style="font-size:10px"><a href="#bomcalcspopup" id="bominfobutton" class="bominfobutton" style="margin:0" data-rel="popup" data-theme="e" data-role="button" data-icon="info" data-iconpos="notext">Add</a></div>
+                            </div>
+                        </div>
+                    </li>
+                    <li style="padding:0.2em 1em; border-width:0 0 0.1em 0; border-color:#777" class="headerrow">
+                        <div class="ui-grid-c" >
+
+                            <div class="ui-block-b" style="width:40px">
+                                <div class="buttondiv addtip"><a href="#addbomitemspopup" id="addbomitemsbutton" data-rel="popup" data-theme="f" data-role="button" data-icon="plus" data-iconpos="notext">Add</a></div>
+                            </div>
+                            <div class="ui-block-c" style="width:40px">
+                                <div class="buttondiv deletetip"><a href="#deletebomitemspopup" id='deletebomitemsbutton' data-theme="g" data-rel="popup" data-role="button" data-icon="delete" data-iconpos="notext">Delete</a></div>
+                            </div>
+                            <div class="ui-block-d" style="width:40px">
+                                <div class="buttondiv refreshitemstip"><a href="#refreshingbomitemspopup" id='refreshbomitemsbutton' data-theme="f" data-rel="popup" data-role="button" data-icon="refresh" data-iconpos="notext">Delete</a></div>
+                            </div>
+                            <div class="ui-block-d" style="width:40px">
+                                <div class="buttondiv importtip"><a href="#importbomitemspopup" data-theme="f" data-rel="popup" data-role="button" data-icon="arrow-u" data-iconpos="notext">Delete</a></div>
+                            </div>
+                        </div>
+                    </li>
+                </ul>
+                <ul class="itemslistview ui-corner-all ui-shadow" data-inset="true" style="width:99%; border:solid; border-width:0 0.1em; border-color:#AAA; border-top-left-radius: 0; border-top-right-radius: 0">
+                    <div id="itemslist">
+                        &nbsp;
+                    </div>
+                </ul>
+            </div>
+	    <div role="main" class="ui-content content-full" >
+            Nothing here.
+        </div>
+    </div><!-- /content -->
+
+    <!-- Popups -->
+
+    <!-- BOM add/edit -->
+    <div data-role="popup" id="bomaddeditpopup" data-overlay-theme="a" data-theme="b" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="b" class="ui-corner-top ui-dialog-header">
+            <h3>Add/Edit BOM</h3>
+        </div>
+        <div data-role="content" data-theme="a" class="ui-corner-bottom ui-dialog-content addedititempopupcontent">
+            <input type="hidden" id="bomaddeditpopuporiginalname" />
+            <label for="bomaddeditpopupname">Name</label>
+            <input type="text" name="bomaddeditpopupname" id="bomaddeditpopupname" value=""  />
+
+            <label for="bomaddeditpopupnotes">Notes</label>
+            <textarea name="bomaddeditpopupnotes" id="bomaddeditpopupnotes" value="" style="height:100px; vertical-align:text-top"></textarea>
+
+            <a href="#" data-role="button" id="bomaddeditsubmit" style="margin-top:30px">Add/Edit Submit</a>
+        </div>
+    </div>
+
+    <!-- BOM parts add from library add/edit -->
+    <div data-role="popup" id="addbomitemspopup" data-overlay-theme="a" data-theme="b" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="b" class="ui-corner-top ui-dialog-header">
+            <div class="ui-grid-b" style="padding:0;margin:0">
+                <div class="ui-block-a" style="margin-left:1.5em">
+                    <h3>Add BOM Items</h3>
+                </div>
+                <!-- This one will just add the items -->
+                <div class="ui-block-b" style="width:40px;padding-top:0.45em">
+                    <div class="addtip"><a href="#" id="addbomitemspopupadditems" data-rel="popup" data-theme="e" data-role="button" data-icon="plus" data-iconpos="notext">Add</a></div>
+                </div>
+                <!-- This one will load the single item into the add/edit screen and use that method -->
+                <div class="ui-block-c" style="width:40px;padding-top:0.45em" >
+                    <div class="addtip"><a href="#" id="addbomitemsaddedit" data-rel="popup" data-theme="e" data-role="button" data-icon="action" data-iconpos="notext">Add</a></div>
+                </div>
+            </div>
+        </div>
+        <!-- Here we are going to borrow the itemslistview style but change height -->
+        <ul class="itemslistview ui-corner-all ui-shadow" data-inset="true" style="width:99%; max-height:500px!important; border:solid; border-width:0 0.1em; border-color:#AAA; border-top-left-radius: 0; border-top-right-radius: 0">
+            <div id="stockitemslist" >
+                &nbsp;
+            </div>
+        </ul>
+    </div>
+
+    <!-- Delete BOM Items -->
+    <div data-role="popup" id="deletebomitemspopup" data-overlay-theme="a" data-theme="d" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="d" class="ui-corner-top ui-dialog-header">
+            <h3>Delete BOM items?</h3>
+        </div>
+        <div data-role="content" id="deletebomitempopupcontent" data-theme="a" class="ui-corner-bottom ui-dialog-content">
+            <a href="#" data-role="button" id="deletebomitemssubmit" style="margin-top:30px">Delete Part</a>
+        </div>
+    </div>
+
+    <!-- Refreshing BOM items popup -->
+    <div data-role="popup" id="refreshingbomitemspopup" data-overlay-theme="a" data-theme="d" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="d" class="ui-corner-top ui-dialog-header">
+            <h3>Refreshing BOM Items</h3>
+        </div>
+        <div data-role="content" id="refreshingbomitempopupcontent" data-theme="a" class="ui-corner-bottom ui-dialog-content">
+        </div>
+    </div>
+
+    <!-- BOM Calc details -->
+    <div data-role="popup" id="bomcalcspopup" data-overlay-theme="a" data-theme="d" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="d" class="ui-corner-top ui-dialog-header">
+            <h3>Bom Details</h3>
+        </div>
+        <div data-role="content" id="bomcalcspopupcontent" data-theme="a" class="ui-corner-bottom ui-dialog-content">
+            &nbsp;
+        </div>
+    </div>
+
+    <!-- Delete BOM -->
+    <div data-role="popup" id="deletebompopup" data-overlay-theme="a" data-theme="d" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="d" class="ui-corner-top ui-dialog-header">
+            <h3>Delete BOM</h3>
+        </div>
+        <div data-role="content" id="deletebompopupcontent" data-theme="a" class="ui-corner-bottom ui-dialog-content">
+            <a href="#" data-role="button" id="deletebomsubmit" style="margin-top:30px">Delete BOM</a>
+        </div>
+    </div>
+
+    <!-- BOM Item add/edit -->
+    <div data-role="popup" id="addedititempopup" data-overlay-theme="a" data-theme="b" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="b" class="ui-corner-top ui-dialog-header">
+            <h3>Add/Edit Item</h3>
+        </div>
+        <div data-role="content" data-theme="a" class="ui-corner-bottom ui-dialog-content addedititempopupcontent">
+            <input type="hidden" id="addedititemoriginalpartid" />
+
+            <div class="ui-grid-b" style="margin:0; padding:0">
+                <div class="ui-block-a livedisabled" style="padding-right:1em width:30%">
+                    <label for="addedititempartid">PartID</label>
+                    <input type="text" name="addedititempartid" id="addedititempartid" value=""  />
+                </div>
+                 <div class="ui-block-b" style="padding-left:1em; width:30%">
+                    <label for="addedititemqty">Qty</label>
+                    <input type="number" name="addedititemqty" id="addedititemqty" value="1"  />
+                </div>
+                <div class="ui-block-c" style="padding-left:1em; width:30%">
+                    <a href="#" data-role="button" data-mini="true" id="addedititemsubmit" class="addedititemsubmit" style="margin-top:10px">Submit</a>
+                </div>
+            </div>
+
+            <label for="addedititemdescription">Description</label>
+            <textarea name="addedititemdescription" id="addedititemdescription" value="" style="height:100px; vertical-align:text-top"></textarea>
+
+            <label for="addedititemnotes">Notes</label>
+            <input type="text" name="addedititemnotes" id="addedititemnotes" value=""  />
+
+            <label for="addedititemmanufacturer">MFR</label>
+            <input type="text" name="addedititemmanufacturer" id="addedititemmanufacturer" value=""  />
+
+            <label for="addedititemmanufacturerpart">MFR PN</label>
+            <input type="text" name="addedititemmanufacturerpart" id="addedititemmanufacturerpart" value=""  />
+
+            <label for="addedititemsupplier">Supplier</label>
+            <input type="text" name="addedititemsupplier" id="addedititemsupplier" value=""  />
+
+            <label for="addedititemsupplierpart">Supp PN</label>
+            <input type="text" name="addedititemsupplierpart" id="addedititemsupplierpart" value=""  />
+
+            <label for="addedititemcost">Cost</label>
+            <input type="text" name="addedititemcost" id="addedititemcost" value=""  />
+
+            <div class="ui-grid-a" style="padding-top:0; margin-top:0; border:none">
+                <div class="ui-block-a">
+                    <label for="addedititemcostqty">Cost Quantity</label>
+                    <input type="text" name="addedititemcostqty" id="addedititemcostqty" value=""  />
+                </div>
+                <div class="ui-block-b">
+                    <label for="addedititemcostqtyunit">Cost Unit</label>
+                    <input type="text" name="addedititemcostqtyunit" id="addedititemcostqtyunit" value=""  />
+                </div>
+            </div>
+            <div class="ui-grid-a" style="padding-top:0; margin-top:0; border:none">
+                <div class="ui-block-a">
+                    <label for="addedititemtype">Item Type</label>
+                    <select name="addedititemtype" id="addedititemtype" data-mini="true">
+                        <option value="parts">parts</option>
+                        <option value="labor">labor</option>
+                    </select>
+                </div>
+                <div class="ui-block-b">
+                    <label for="addedititeminventory">Inventory</label>
+                    <select name="addedititeminventory" id="addedititeminventory" data-mini="true">
+                        <option value="std">Std</option>
+                        <option value="none">None</option>
+                    </select>
+                </div>
+            </div>
+            <a href="#" data-role="button" id="addedititemsubmit2" class="addedititemsubmit" style="margin-top:30px">Add/Edit Part</a>
+        </div>
+    </div>
+
+    <!--/Popups -->
+
+    <!-- Panels -->
+    <style>
+        .nav-search .ui-btn-up-a {
+            background-image:none;
+            background-color:#333333;
+        }
+        .nav-search .ui-btn-inner {
+            border-top: 1px solid #888;
+            border-color: rgba(255, 255, 255, .1);
+        }
+    </style>
+
+    <div data-role="panel" data-position="left" data-position-fixed="false" data-display="reveal" id="nav-panel" data-theme="a">
+        <ul data-role="listview" data-theme="a" data-divider-theme="a" style="margin-top:-16px;" class="nav-search">
+            <li data-icon="delete" style="background-color:#111;">
+                <a href="#" data-rel="close">Close menu</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="stock.html" data-ajax="false">Stock</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="inventories.html" data-ajax="false">Inventories</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="boms.html" data-ajax="false">Bill of Materials</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="assemblies.html" data-ajax="false">Assemblies</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="orders.html" data-ajax="false">Orders</a>
+            </li>
+        </ul>
+        <!-- panel content goes here -->
+    </div><!-- /panel -->
+
+    <style>
+        .userform { padding:.8em 1.2em; }
+        .userform h2 { color:#555; margin:0.3em 0 .8em 0; padding-bottom:.5em; border-bottom:1px solid rgba(0,0,0,.1); }
+        .userform label { display:block; margin-top:1.2em; }
+        .switch .ui-slider-switch { width: 6.5em !important }
+        .ui-grid-a { margin-top:1em; padding-top:.8em; margin-top:1.4em; border-top:1px solid rgba(0,0,0,.1); }
+    </style>
+
+    <div data-role="panel" data-position="right" data-position-fixed="false" data-display="overlay" id="settings" data-theme="b">
+
+            <ul data-role="listview" data-theme="a" data-divider-theme="a" style="margin-top:-16px;" class="nav-search">
+
+                <li data-icon="delete" style="background-color:#111;">
+                    <a href="#" data-rel="close">Close menu</a>
+                </li>
+
+                <?php
+                if($user->logged_in()):
+                ?>
+
+                    <li><div class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0.7em"><?php echo $_SESSION['user']['name']; ?></div></li>
+                    <li><a data-ajax="false" href="/auth/logoutmobile">Log out</a></li>
+                    <?php
+                endif;
+                if(!$user->logged_in()):
+                ?>
+                    <li><div class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0.7em">Not logged in</div></li>
+                    <li><a data-ajax="false" href="/auth/loginmobile" style="padding-right:10px">Log in</a></li>
+                <?php
+                    endif;
+                ?>
+                <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                    <a href="auth/manage.php">Manager user</a>
+                </li>
+
+            </ul>
+        <!-- panel content goes here -->
+    </div><!-- /panel -->
+
+    <style>
+        .userform { padding:.8em 1.2em; }
+        .userform h2 { color:#555; margin:0.3em 0 .8em 0; padding-bottom:.5em; border-bottom:1px solid rgba(0,0,0,.1); }
+        .userform label { display:block; margin-top:1.2em; }
+        .switch .ui-slider-switch { width: 6.5em !important }
+        .ui-grid-a { margin-top:1em; padding-top:.8em; margin-top:1.4em; border-top:1px solid rgba(0,0,0,.1); }
+    </style>
+
+    <div data-role="panel" data-position="right" data-position-fixed="false" data-display="overlay" id="settings" data-theme="b">
+
+        <!--<form class="userform">-->
+        <ul data-role="listview" data-theme="a" data-divider-theme="a" style="margin-top:-16px;" class="nav-search">
+
+            <li data-icon="delete" style="background-color:#111;">
+                <a href="#" data-rel="close">Close menu</a>
+            </li>
+
+            <?php
+            if($user->logged_in()):
+            ?>
+
+                <li><div class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0"><?php echo $_SESSION['user']['name']; ?></div></li>
+                <li><div id="pathalias" class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0">&nbsp;</div></li>
+                <li><a data-ajax="false" href="/auth/logoutmobile">Log out</a></li>
+                <?php
+            endif;
+            if(!$user->logged_in()):
+            ?>
+                <li><div class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0.7em">Not logged in</div></li>
+                <li><a data-ajax="false" href="/auth/loginmobile" style="padding-right:10px">Log in</a></li>
+            <?php
+                endif;
+            ?>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="auth/manage.php">Manage user</a>
+            </li>
+
+        </ul>
+
+        <!-- panel content goes here -->
+    </div><!-- /panel -->
+    <!-- /Panels -->
+
+	<div data-role="footer" data-theme="d">
+		<div class="footertext">Copyright 2016 Interface Innovations</div>
+	</div><!-- /footer -->
+</div><!-- /page -->
+
+</body>
+</html>

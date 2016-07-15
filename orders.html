@@ -1,0 +1,1255 @@
+<?php require_once('auth/user.php'); ?>
+<?php $user->require_login(); ?>
+<?php $user->reload_session(); ?>
+<!DOCTYPE html>
+<html>
+<head>
+
+	<title>IIInventory :: Orders</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"/>
+    <meta charset="utf-8"/>
+
+	<link rel="stylesheet" href="jqm/themes/jqmbasetheme.css" />
+
+    <link rel="stylesheet" href="jqm/themes/jquery.mobile.icons.min.css" />
+    <link rel="stylesheet" href="jqm/jquery.mobile.custom.structure.min.css" />
+    <link rel="stylesheet" href="js/jquery-ui-1.11.4.custom/jquery.mobile.datepicker.css" />
+    <link rel="stylesheet" href="css/inventory.css" />
+
+	<script src="js/jquery-1.11.0.js"></script>
+
+    <script src="js/jquery-ui-1.11.4.custom/jquery-ui.js"></script>
+    <script src="js/jquery.ui.touch-punch.min.js"></script>
+
+    <!--jQuery Mobile is 1.4.5-->
+	<script src="jqm/jquery.mobile.custom.js"></script>
+    <script src="js/jquery-ui-1.11.4.custom/jquery.mobile.datepicker.js"></script>
+	<script src="js/iijslib.js"></script>
+    <script src="js/inventoryjslib.js"></script>
+
+</head>
+
+<body>
+	<div data-role="page" id="demo-page" data-theme="d">
+
+<script>
+
+var sessiondata = {};
+sessiondata.username = "<?php if (!empty($_SESSION['user']['name'])) { echo $_SESSION['user']['name'];} ?>";
+sessiondata.sessionid = "<?php if (!empty($_SESSION['user']['sessionid'])) {echo $_SESSION['user']['sessionid'];} ?>";
+sessiondata.appip =  "<?php if (!empty($_SESSION['user']['appip'])) {echo $_SESSION['user']['appip'];} ?>";
+sessiondata.realip =  "<?php if (!empty($_SESSION['user']['realip'])) {echo $_SESSION['user']['realip'];} ?>";
+sessiondata.authlevel =  "<?php if (!empty($_SESSION['user']['authlevel'])) {echo $_SESSION['user']['authlevel'];} ?>";
+sessiondata.hpass =  "<?php if (!empty($_SESSION['user']['hpass'])) {echo $_SESSION['user']['hpass'];} ?>";
+sessiondata.accesskeywords =  "<?php if (!empty($_SESSION['user']['accesskeywords'])) {echo $_SESSION['user']['accesskeywords'];} ?>";
+
+var metastring = "<?php if (!empty($_SESSION['user']['metadata'])) {echo $_SESSION['user']['metadata'];} ?>";
+sessiondata.usermeta = stringJSONparse(metastring);
+
+var stockdata = [];
+
+var allordersdata = [];
+var filteredordersdata = [];
+
+var ordersviewdata = {};
+var activeorderdata = {};
+
+var uisettings = {};
+var filteritems = ['status'];
+var filternames = ['Status'];
+var orderpartitems = ['partid', 'description', 'notes', 'manufacturer', 'manufacturerpart', 'cost', 'costqty', 'costqtyunit', 'type', 'inventory', 'qty']
+
+
+// So we can do this in the browser, which brings all data to the browser, but allows quicker filter revisions
+// Or we can filter on the server, which minimizes data sent to the browser, but makes revision of filters slower
+// due to having to fetch it every time.
+
+var filtermethod = 'browser';
+
+function filterOrdersData(data) {
+    var tempfiltereddata = []
+    for (var j=0;j<data.length;j++) {
+        var datum = data[j];
+
+        var keepdatum=true;
+        if (datum.name == 'metadata') {
+            keepdatum=false
+        }
+        else {
+            for (var i = 0; i < filteritems.length; i++) {
+                var filteritem = filteritems[i];
+                var propertyname = 'order' + filteritem + 'filter';
+                if (uisettings.hasOwnProperty(propertyname)) {
+                    var propertyvalue = uisettings[propertyname];
+                    if (['all', 'All'].indexOf(propertyvalue) < 0) {
+                        //                    console.log('is not all. Is ' + propertyvalue)
+                        if (datum[filteritem] == propertyvalue) {
+                            //                        console.log('property match for part ' + datum.status + ' with value ' + datum[filteritem])
+                        }
+                        else {
+                            keepdatum = false
+                        }
+                    }
+                }
+            }
+        }
+        if (keepdatum) {
+            tempfiltereddata.push(datum)
+        }
+    }
+    return tempfiltereddata;
+}
+
+function filterOrderItemsData(data){
+    var filtereddata = data;
+    return filtereddata;
+}
+
+function uiInit() {
+    // This is where we will get this stuff from the uisettings table
+    uisettings = {orderstatusfilter: 'active', activeordername:'sampleorder'};
+
+    // In thise case, we can render here because it is a static html element
+    $('#orderstatusfilterjqmselect').val(uisettings.orderstatusfilter)
+//    $('#orderstatusfilterjqmselect').selectmenu('refresh')
+
+}
+
+function uiRefresh() {
+    // This function runs just to fresh front panel settings from the uisettings object.
+    // We can use this to refresh after creating the filter elements
+    // The filter elements have to be recreated and populated every time the stock is updated, so they cannot
+    // be static.
+
+    for (var i=0;i<filteritems.length; i++) {
+        var filteritem = filteritems[i];
+        var propertyname ='stock' + filteritem + 'filter';
+//        console.log(propertyname)
+        if (uisettings.hasOwnProperty(propertyname)) {
+            var propertyvalue = uisettings[propertyname];
+//            console.log(propertyname + ' : ' + uisettings[propertyname]);
+            $('#' + filteritem + 'filterjqmselect').val(propertyvalue);
+            $('#' + filteritem + 'filterjqmselect').selectmenu('refresh');
+        }
+    }
+
+    // Mark active order
+    var activeindex=0;
+    if (ordersviewdata.names.indexOf(uisettings.activeordername) > 0 ){
+        activeindex = ordersviewdata.names.indexOf(uisettings.activeordername)
+    }
+    else { // this should never happen
+        // This will actually happen if the uisettings 'activeordername' is set to the name of a order that does not exist
+        activeindex = 0;
+        uisettings.activeordername = ordersviewdata.names[activeindex];
+    }
+    // fill with empty if nothing there.
+    if (! ordersviewdata.metadata[activeindex]){
+        activeorderdata.metadata = {cost:'', price:''}
+    }
+    else {
+        activeorderdata.metadata = ordersviewdata.metadata[activeindex];
+    }
+
+
+    $('#orderdetails').html('Cost: $' + setprecision(activeorderdata.metadata.cost,2) + ', Price: $' +
+            setprecision(activeorderdata.metadata.price,2));
+
+    $('.orderlistitem').each(function(){
+        var selector = $(this)
+        selector.removeClass('activeorderitem');
+        var index = selector.prop('id').split('_')[1]
+        // get index and see if it is selected after all
+        if (index == activeindex) {
+//            console.log('FOUND ACTIVE ITEM')
+            selector.addClass('activeorderitem')
+
+        }
+    });
+}
+
+function uiSettingsGet(){
+
+    for (var i=0;i<filteritems.length; i++) {
+        var filteritem = filteritems[i];
+        var propertyname ='order' + filteritem + 'filter';
+        if (uisettings.hasOwnProperty(propertyname)) {
+            var currentvalue = $('#' + filteritem + 'filterjqmselect').val();
+            uisettings[propertyname] = currentvalue
+        }
+        else{
+            console.log('ERROR with uisettings value ' + propertyname)
+        }
+    }
+    console.log(uisettings)
+}
+
+function populateAddEditItem(item, renderitems){
+    renderitems = renderitems || orderpartitems;
+    for (var i=0;i<renderitems.length;i++){
+        var renderitem = renderitems[i];
+        var selector = $('#addedititem' + renderitem);
+        selector.val(item[renderitem]);
+        if (selector.is("select")) {
+            selector.selectmenu('refresh')
+        }
+    }
+    var reformatteddate = dateTimeStringToPickerTime(item.received);
+    console.log(item.received);
+    console.log(reformatteddate);
+    $('#addedititemreceiveddate').val(reformatteddate.datestring);
+    $('#addedititemreceivedtime').val(reformatteddate.timestring)
+}
+
+function getSelectedListItems(classname, refarray) {
+    // What we are doing here is iterating over classes of a checkbox,
+    // and when it is checked, returning the items that are indexed in refarray
+    // So if checkbox array is rendered into list from refarray, the checked box at the nth position
+    // corresponds to the full entry at refarray.
+    // We then take the element at refarray, at an 'index' property, and return it
+
+    var selecteditems = [];
+    var index = 0;
+    $('.' + classname).each(function(){
+        if ($(this).prop('checked')) {
+            var id = $(this).attr('id');
+            console.log(id);
+            index = id.split('_')[1];
+            var item = refarray[index];
+            item['index'] = index;
+            selecteditems.push(item)
+        }
+    });
+    return selecteditems
+}
+
+function editOrderSubmit(){
+
+    var orderdata = {};
+    var valuelist = ['desc', 'notes', 'name', 'supplier']
+    for (var i=0; i<valuelist.length; i++) {
+        orderdata[valuelist[i]] = $('#ordereditpopup' + valuelist[i]).val()
+    }
+    var datestring =  $('#ordereditpopupexecuteddate').val();
+    var timestring =  $('#ordereditpopupexecutedtime').val();
+    var reformatteddatetimestring = pickerDateTimeToDateTimeString(datestring, timestring);
+
+    orderdata.executed = reformatteddatetimestring;
+
+    editOrder({orderdata:orderdata});
+}
+
+function addEditOrderPartSubmit(){
+
+    console.log(orderpartitems)
+    // get data from the form
+    var orderpartdata = {};
+    for (var i=0; i<orderpartitems.length; i++) {
+        orderpartdata[orderpartitems[i]] = $('#addedititem' + orderpartitems[i]).val()
+    }
+    var datestring =  $('#addedititemreceiveddate').val();
+    var timestring =  $('#addedititemreceivedtime').val();
+//    console.log(datestring)
+//    console.log(timestring)
+    var reformatteddatetimestring = pickerDateTimeToDateTimeString(datestring, timestring);
+    console.log(reformatteddatetimestring)
+
+    orderpartdata.received = reformatteddatetimestring;
+
+//    console.log(orderpartdata)
+    addEditOrderPart({ordername:activeorderdata.metadata.name, partdata:orderpartdata});
+}
+
+function renderOrdersResponse (response,options) {
+
+    var timeout = 0
+    // Set interval function. We either pass a class to retrieve it from,
+    // a static value, or nothing
+    if (options.hasOwnProperty('timeoutclass')) {
+        timeout = $('.' + options.timeoutclass).val() * 1000;
+    }
+    else if (options.hasOwnProperty('timeout')) {
+        timeout = options.timeout;
+    }
+    if (timeout > 0) {
+        setTimeout(function () {
+            getAndRenderOrders(options)
+        }, timeout);
+    }
+    if (response.hasOwnProperty('data')) {
+        allordersdata = response.data;
+        // do all the filtering and sorting in the render routine
+    }
+    else {
+        console.log('no data returned.')
+    }
+    renderOrdersTable(allordersdata);
+//    console.log(ordersdata)
+}
+
+function renderOrdersTable(ordersdata){
+    var htmlstring = '';
+    ordersdata = ordersdata || allordersdata;
+
+    // Now we filter and sort it
+    // Filter
+    if (filtermethod == 'browser') {
+        filteredordersdata = filterOrdersData(ordersdata);
+    }
+
+    // sort by name
+    filteredordersdata.sort(function(a, b) {
+        return (a.name > b.name) ? 1 : ((b.name > a.name) ? -1 : 0)
+    });
+
+    var ordernames = [];
+    for (var i=0;i<filteredordersdata.length;i++) {
+        ordernames.push(filteredordersdata[i].name)
+    }
+    ordersviewdata.names=ordernames;
+    ordersviewdata.metadata=filteredordersdata;
+
+    //rerendered, so rerender metadata
+
+
+//    console.log('filtereddata is of length: ' + filtereddata.length)
+    // Sort the data. We do this in js because we want to be able to change it on the fly
+
+
+    for (var i=0;i<filteredordersdata.length;i++){
+        var item = filteredordersdata[i];
+//        console.log(item)
+        htmlstring += '' +
+        '<li class="orderlistitem" id="orderlistitem_' + i + '">' +
+            '<table><tr>' +
+                '<td class="orderitemcbtd">' +
+                    '<input  type="checkbox" name="listitem' + i + '" class="orderlistitemcb" id="orderlistitemcb_' + i + '">' +
+                '</td>'+
+                '<td>' +
+                    '<div class="itembuttondiv edittip"><a href="#ordereditpopup" class="ordereditbutton" id="orderditbutton_' + i + '" data-theme="f"  data-rel="popup" data-role="button" data-icon="edit" data-iconpos="notext">Edit</a></div>' +
+                '</td>' +
+                '<td style="text-align:left; width:25px; padding-left:1em" id="ordername_' + i + '">' +
+                    item.name +
+                '</td>' +
+                '<td style="text-align:left; width:100px; padding-left:1em" id="orderdesc_' + i + '">' +
+                    item.desc +
+                '</td>' +
+                 '<td style="text-align:left; width:60px; padding-left:1em" id="orderexecuted_' + i + '">' +
+                    item.status +
+                '</td>' +
+                '<td style="text-align:left; width:60px; padding-left:1em" id="orderexecuted_' + i + '">' +
+                    item.orderstatus +
+                '</td>' +
+                '<td style="text-align:left; width:100px; padding-left:1em" id="orderexecuted_' + i + '">' +
+                    item.supplier +
+                '</td>' +
+
+            '</tr></table>' +
+        '</li>'
+    }
+    htmlstring += '<li class="lastli">&nbsp;</li>'
+//    console.log(htmlstring)
+    $('#orderslistview').html(htmlstring);
+    $('#orderslistview').trigger('create');
+
+    $('.ordereditbutton').click({},function(event){
+        // Use the id of the button that was clicked to populate the addedit window
+
+        var id = event.target.id;
+        var index = id.split('_')[1]
+//        console.log('index ' + index + ' selected.')
+        var itemmeta = filteredordersdata[index];
+
+        // Render data into item edit window
+        $('#ordereditpopupdesc').val(itemmeta.desc);
+        $('#ordereditpopupnamedisp').html(itemmeta.name);
+        $('#ordereditpopupname').val(itemmeta.name);
+        $('#ordereditpopupnotes').val(itemmeta.notes);
+        $('#ordereditpopupsupplier').val(itemmeta.supplier);
+
+        var reformatteddate = dateTimeStringToPickerTime(itemmeta.executed);
+        console.log(itemmeta.executed)
+        console.log(reformatteddate)
+        $('#ordereditpopupexecuteddate').val(reformatteddate.datestring);
+        $('#ordereditpopupexecutedtime').val(reformatteddate.timestring)
+
+    });
+
+
+    $('.orderlistitem').click(function(){
+        var selector = $(this)
+        var index = selector.prop('id').split('_')[1];
+        activeorderdata.index = index;
+        activeorderdata.metadata = ordersviewdata.metadata[index];
+        uisettings.activeordername = ordersviewdata.names[index];
+
+        getAndRenderSelectedOrder();
+        uiRefresh()
+    });
+    uiRefresh();
+
+    getAndRenderSelectedOrder();
+//    renderSelectionTable({order:stockdata});
+}
+
+function renderOrderResponse(response) {
+    if (response.hasOwnProperty('data')) {
+        activeorderdata.items = response.data;
+        renderSelectedOrder(activeorderdata)
+    }
+}
+
+function renderSelectedOrder(data){
+
+    // we take the entire thing so we can render the metadata as well
+    data = data || activeorderdata;
+
+    var htmlstring = '';
+    var itemlistitems = ['partid', 'qty', 'received', 'description', 'cost', 'totalcost', 'type', 'margin', 'price', 'totalprice', 'supplier'];
+    var itemlistnames = ['partid',  'qty', 'received', 'description','cost', 'total cost', 'type', 'margin', 'price', 'totalprice', 'supplier'];
+    var itemlistwidths = [45,         30,        80,     150,     50,     60,          60,       50,      50,        50,          125];
+
+    var filtereddata = [];
+
+    // We should actually move this filtering above so that when we search through the data, we don't get stuff
+    // that has been filtered and/or sorted
+
+    if (filtermethod == 'browser') {
+        filtereddata = filterOrderItemsData(data.items);
+    }
+    else {
+        // to be fixed ...
+        filtereddata = data;
+    }
+    // Sort the data. We do this in js because we want to be able to change it on the fly
+    filtereddata.sort(function(a, b) {
+        return (a.partid > b.partid) ? 1 : ((b.partid > a.partid) ? -1 : 0)
+    });
+
+    // Let's make a list of descriptions
+    htmlstring += '<li class="headerrow"><table><tr><td style="width:22px; font-size:10px">';
+    htmlstring += '<div class="ui-block-a " style="width:40px; ">'+
+                  '<input  type="checkbox" name="orderselectallcb" style="margin-left:-0.3125em" class="orderselectallcb orderpartslistitemcb" id="orderselectallcb">' +
+                  '</div></li>';
+    for (var j=0;j<itemlistitems.length;j++){
+        htmlstring += '<td style="text-align:center; width:' + itemlistwidths[j] +'px">' + itemlistnames[j] + '</td>'
+    }
+    htmlstring += '</tr></table></li>';
+    for (var i=0;i<filtereddata.length;i++){
+        var stockitem = filtereddata[i];
+//        console.log(stockitem)
+        htmlstring += '' +
+        '<li class="selectionitem">' +
+            '<table><tr>' +
+                '<td class="orderpartslistitemcbtd">' +
+                    '<input  type="checkbox" name="listitem' + i + '" class="orderpartslistitemcb" id="orderpartslistitemcb_' + i + '">' +
+                '</td>'+
+                '<td>' +
+                    '<div class="itembuttondiv edittip"><a href="#addedititempopup" class="listitemeditbutton" id="stockitemeditbutton_' + i + '" data-theme="f"  data-rel="popup" data-role="button" data-icon="edit" data-iconpos="notext">Edit</a></div>' +
+                '</td>';
+
+
+        for (var j=0;j<itemlistitems.length;j++) {
+//            console.log(stockitem[j])
+            htmlstring += '<td style="text-align:center; width:' + itemlistwidths[j] +'px" id="item' + j + stockitem[j] + '">' +
+                    stockitem[itemlistitems[j]] +
+                '</td>'
+        }
+        htmlstring +='</tr></table></li>'
+    }
+
+    htmlstring += '<li class="lastli">&nbsp;</li>'
+//    console.log(htmlstring)
+    $('#itemslist').html(htmlstring);
+    $('#itemslist').trigger('create');
+
+    // Throw in some data
+//    $('#orderdetails').html('Cost: $' + activeorderdata.metadata.cost + ', Price: $' + activeorderdata.metadata.price)
+
+    $('.listitemeditbutton').click({},function(event){
+        // Use the id of the button that was clicked to populate the addedit window
+
+        var id = event.target.id;
+        var index = id.split('_')[1]
+//        console.log('index ' + index + ' selected.')
+        var item = activeorderdata.items[index]
+        // Render data into item edit window
+        populateAddEditItem(item);
+
+    });
+    $('.listitemcopybutton').click({},function(event){
+        var id = event.target.id;
+        var index = id.split('_')[1]
+        var item = stockdata[index]
+        var partdata = {partid:item['partid']}
+        copyPart({partdata:partdata})
+    });
+    $('#orderselectallcb').change(function(){
+        console.log($('#orderselectallcb').prop('checked'))
+        var state = false;
+        if ($('#orderselectallcb').prop('checked')) {
+            state = true
+        }
+        $('.orderpartslistitemcb').prop('checked',state);
+    });
+}
+
+function renderStockResponse (response,options) {
+
+    var timeout = 0
+    // Set interval function. We either pass a class to retrieve it from,
+    // a static value, or nothing
+    if (options.hasOwnProperty('timeoutclass')) {
+        timeout = $('.' + options.timeoutclass).val() * 1000;
+    }
+    else if (options.hasOwnProperty('timeout')) {
+        timeout = options.timeout;
+    }
+    if (timeout > 0) {
+        setTimeout(function () {
+            getAndRenderStock(options)
+        }, timeout);
+    }
+    if (response.hasOwnProperty('data')) {
+        // Here we filter and sort as soon as we get the data. This is as opposed to
+        // stock page, where we keep a copy of the unfiltered data around. This may change, but probably not
+        response.data = filterStockData(response.data);
+
+        response.data.sort(function(a, b) {
+        return (a.partid > b.partid) ? 1 : ((b.partid > a.partid) ? -1 : 0)
+        });
+        stockdata = response.data;
+    }
+    else {
+        console.log('no data returned.')
+    }
+    renderStockTable(stockdata);
+}
+
+function renderStockTable(renderstockdata){
+    renderstockdata = renderstockdata || stockdata;
+
+    var htmlstring = '';
+    var itemlistitems = ['partid', 'description', 'qtyavailable', 'cost', 'supplier'];
+    var itemlistnames = ['partid', 'description', 'avail', 'cost', 'supplier'];
+    var itemlistwidths = [40, 160, 50, 50, 50, 50, 50, 100];
+
+    // Let's make a list of descriptions
+    htmlstring += '<li class="headerrow"><table><tr><td style="width:80px; font-size:10px">';
+    for (var j=0;j<itemlistitems.length;j++){
+        htmlstring += '<td style="text-align:center; width:' + itemlistwidths[j] +'px">' + itemlistnames[j] + '</td>'
+    }
+    htmlstring += '</tr></table></li>';
+    for (var i=0;i<renderstockdata.length;i++){
+        var stockitem = renderstockdata[i];
+//        console.log(stockitem)
+        htmlstring += '' +
+        '<li class="selectionitem">' +
+            '<table><tr>' +
+                '<td class="stockitemcbtd" style="width:7%!important">' +
+                    '<input  type="checkbox" name="stocklistitem' + i + '" class="stocklistitemcb" id="stocklistitemcb_' + i + '">' +
+                '</td>' +
+                '<td class="stockitemnumbertd">' +
+                    '<input type="number" value="1" name="stocklistitem' + i + '" class="stocklistitemnumber" id="stocklistitemnumber_' + i + '">' +
+                '</td>';
+
+        for (var j=0;j<itemlistitems.length;j++) {
+            htmlstring += '<td style="text-align:center; width:' + itemlistwidths[j] +'px" id="item' + j + stockitem[j] + '">' +
+                    stockitem[itemlistitems[j]] +
+                '</td>'
+        }
+        htmlstring +='</tr></table>' +
+        '</li>'
+    }
+    htmlstring += '<li class="lastli">&nbsp;</li>';
+
+    $('#stockitemslist').html(htmlstring);
+    $('#stockitemslist').trigger('create');
+
+//    renderSelectionTable({order:stockdata});
+}
+
+function filterStockData(stockdata) {
+    var filtereddata = []
+
+    for (var i=0;i<stockdata.length;i++){
+        if (stockdata[i].status == 'active'){
+            filtereddata.push(stockdata[i])
+        }
+    }
+    return filtereddata
+}
+
+function renderOrderCalcs(response, options){
+
+    var htmlstring = '<ul data-role="listview">';
+    var totalsstring = '';
+    var partsstring = '';
+    var laborstring = '';
+    var otherstring = '';
+    console.log(response);
+
+    // reform to sort
+    var properties = [];
+    $.each(response.data, function(property,value) {
+        properties.push({name:property, value:value})
+    });
+
+    properties.sort(function(a, b) {
+        return (a.name > b.name) ? 1 : ((b.name > a.name) ? -1 : 0)
+    });
+    function makeliststring(item) {
+        var liststring = '<li><div class="ui-grid-a" style="width:100%;padding:0.1em 0 0 0.4em;border:none;margin-top:0">' +
+                    '<div class="ui-block-a">' + item.name + '</div>' +
+                    '<div class="ui-block-b" style="width:125px;text-align: right">' + setprecision(item.value,2) + '</div>' +
+                    '</div></li>'
+
+        return liststring;
+    }
+    $.each(properties, function(index, item) {
+        if (item.name.search('parts') >= 0) {
+            partsstring += makeliststring(item);
+//            partsstring += '<li><div class="ui-grid-a" style="width:100%;padding:0.1em 0 0 0.4em;border:none;margin-top:0">' +
+//                    '<div class="ui-block-a">' + item.name + '</div>' +
+//                    '<div class="ui-block-b" style="width:125px;text-align: right">' + setprecision(item.value,2) + '</div>' +
+//                    '</div></li>'
+        }
+        if (item.name.search('labor') >= 0) {
+
+            laborstring += makeliststring(item);
+        }
+        if (item.name.search('total') >= 0) {
+            totalsstring += makeliststring(item);
+        }
+        else  {
+            otherstring += makeliststring(item);
+        }
+
+    });
+    htmlstring += "<li data-role='list-divider'>" + 'Parts</li>';
+    htmlstring += partsstring;
+    htmlstring += "<li data-role='list-divider'>" + 'Labor</li>';
+    htmlstring += laborstring;
+    htmlstring += "<li data-role='list-divider'>" + 'Other</li>';
+    htmlstring += otherstring;
+    htmlstring += "<li data-role='list-divider'>" + 'Total</li>';
+    htmlstring += totalsstring;
+
+    htmlstring += '</ul>'
+
+    $('#ordercalcspopup').html(htmlstring).trigger('create')
+}
+
+function refreshSelectedInventoryItems(){
+
+    var selecteditems = getSelectedListItems('orderpartslistitemcb', activeorderdata.items);
+    var partids = [];
+
+    var contentmessage = 'Refreshing items from stockdb: <br /><ul>';
+    for (var i=0;i<selecteditems.length;i++){
+        var partid = selecteditems[i].partid;
+        partids.push(partid);
+        contentmessage += '<li style="border:none; padding:0.1em 0 0.1em 0.4em">' + partid + '</li>'
+    }
+    contentmessage += '</ul>'
+    $('#refreshingorderitempopupcontent').html(contentmessage);
+    var options = {ordername:activeorderdata.metadata.name, partids:partids};
+    options.callback = renderOrdersTable;
+    reloadItemDataFromStock(options);
+    console.log(options)
+
+}
+
+$(document).ready(function(){
+
+    // This just loads up uisettings for use elsewhere.
+    uiInit();
+
+    $(".addtip").attr('title', 'Add an item');
+    $(".copytip").attr('title', 'Copy an item');
+    $(".deletetip").attr('title', 'Delete an item');
+    $(".edittip").attr('title', 'Edit an item');
+    $(".importtip").attr('title', 'Import from .csv');
+    $(".cleartip").attr('title', 'Clear filters');
+
+    $('#orderaddbutton').click(function(){addOrder({})})
+    $("#ordereditsubmit").click(function(){editOrderSubmit()});
+    $('#ordereditpopupsetnow').click(function(){
+        var stringtime = getStringTime();
+        var reformatteddate = dateTimeStringToPickerTime(stringtime);
+        console.log(stringtime);
+        console.log(reformatteddate);
+
+//        console.log(itemmeta.executed)
+//        console.log(reformatteddate)
+        $('#ordereditpopupexecuteddate').val(reformatteddate.datestring);
+        $('#ordereditpopupexecutedtime').val(reformatteddate.timestring)
+    });
+
+    $('#ordereditpopupcleartime').click(function(){
+        $('#ordereditpopupexecuteddate').val('');
+        $('#ordereditpopupexecutedtime').val('')
+    });
+    $(".addedititemsubmit").click(function(){addEditOrderPartSubmit()});
+    $("#addorderitemsbutton").click(function(){
+        // popup also opens
+        getAndRenderStock();
+    });
+    $('#addorderitemspopupadditems').click(function(){
+
+        // Also need to get quantity in here
+        var selecteditems = getSelectedListItems('stocklistitemcb', stockdata);
+
+
+        var numitemsselected = selecteditems.length;
+        if (numitemsselected == 0) {
+            alert('No part selected! ')
+        }
+        else {
+            for (var i=0;i<selecteditems.length;i++) {
+                // The function above actually returns stockdata already, so we could simplify this
+
+                var partdata = stockdata[selecteditems[i].index];
+                var selectorid = '#stocklistitemnumber_' + selecteditems[i].index;
+                console.log(selectorid)
+                var qty = $(selectorid).val();
+                partdata.qty = qty;
+                console.log(qty);
+                addEditOrderPart({ordername: activeorderdata.metadata.name, copystock:'missing', partdata:partdata})
+
+            }
+        }
+
+    });
+    $('.ordercopybutton').click({},function(event){
+        var selecteditems = getSelectedListItems('orderlistitemcb', ordersviewdata.metadata)
+        for (var i=0; i<selecteditems.length;i++){
+            var itemmeta = selecteditems[i];
+            console.log(itemmeta)
+            copyOrder({ordername:itemmeta.name})
+        }
+
+    });
+    $('#deleteorderbutton').click(function(){
+        var selecteditems = getSelectedListItems('orderlistitemcb', ordersviewdata.names);
+        var numitemsselected = selecteditems.length;
+        var contentmessage = '';
+        var ordernamestodelete = [];
+        if (numitemsselected > 0) {
+            console.log(selecteditems)
+            contentmessage = 'You are trying to delete:<br />';
+            for (var i=0;i<selecteditems.length;i++) {
+                ordernamestodelete.push(selecteditems[i]);
+                contentmessage += selecteditems[i] + '<br />';
+            }
+            contentmessage += '<a href="#" data-icon="delete" data-theme="g" data-role="button" id="deleteordersubmit" style="margin-top:30px">Delete Order(s)</a>'
+        }
+        else {
+            contentmessage = 'No items selected for deletion'
+        }
+        $('#deleteorderpopupcontent').html(contentmessage);
+        $('#deleteorderpopupcontent').trigger('create');
+        $('#deleteordersubmit').click(function() {
+            // this is a sacrificial part to ensure that this gets sent in as an array. When there is only
+            // one item, it comes up differently as json.
+            // This actually should be fixed on the server now
+            ordernamestodelete.push('anonexistentorder');
+            deleteOrders({ordernames: ordernamestodelete});
+            $('#deleteorderpopup').popup('close');
+        });
+});
+    $('#addorderitemsaddedit').click(function(){
+        // Load entries into add/edit screen
+        // Get index of selected item. If more than one, complain
+        var selecteditems = getSelectedListItems('stocklistitemcb', stockdata);
+        var numitemsselected = selecteditems.length;
+
+        if (numitemsselected == 0) {
+            alert('No part selected! ')
+        }
+        else if (numitemsselected > 1) {
+            alert('Too many parts selected for edit option. \r\n Use Add Multiple ' +
+                    '(other button) or unselect items.' )
+        }
+        else {
+            // populate
+            var index = selecteditems[0].index;
+            populateAddEditItem(stockdata[index]);
+            // Close add item to order popup
+            $('#addorderitemspopup').popup('close');
+
+            // Open add/edit pop-up
+            setTimeout(function(){$('#addedititempopup').popup('open')}, 200)
+        }
+    });
+    $('#addedititemreceivedsetnow').click(function(){
+        var stringtime = getStringTime();
+        var reformatteddate = dateTimeStringToPickerTime(stringtime);
+        console.log(stringtime);
+        console.log(reformatteddate);
+
+//        console.log(itemmeta.executed)
+//        console.log(reformatteddate)
+        $('#addedititemreceiveddate').val(reformatteddate.datestring);
+        $('#addedititemreceivedtime').val(reformatteddate.timestring)
+    })
+    $('#addedititemcleartime').click(function(){
+        $('#addedititemreceiveddate').val('');
+        $('#addedititemreceivedtime').val('')
+    });
+    // Not done yet. Need to do for both orders and order items. Ick
+    $("#deleteorderitemsbutton").click(function(){
+
+        // Iterate over items to find those selected.
+        var partidstodelete = [];
+        var contentmessage = '';
+
+        var selecteditems = getSelectedListItems('orderpartslistitemcb', activeorderdata.items);
+        var numitemsselected = selecteditems.length;
+        if (numitemsselected > 0) {
+            console.log(selecteditems)
+            contentmessage = 'You are trying to delete:<br />';
+            for (var i=0;i<selecteditems.length;i++) {
+                partidstodelete.push(selecteditems[i].partid);
+                contentmessage += selecteditems[i].partid + '<br />';
+            }
+            contentmessage += '<a href="#" data-icon="delete" data-theme="g" data-role="button" id="deleteorderitemssubmit" style="margin-top:30px">Delete Part(s)</a>'
+        }
+        else {
+            contentmessage = 'No items selected for deletion'
+        }
+        $('#deleteorderitempopupcontent').html(contentmessage);
+        $('#deleteorderitempopupcontent').trigger('create');
+        $('#deleteorderitemssubmit').click(function(){
+            // this is a sacrificial part to ensure that this gets sent in as an array. When there is only
+            // one item, it comes up differently as json.
+            // This actually should be fixed on the server now
+            partidstodelete.push('anonexistentpart');
+            deletePartsFromOrder({partids:partidstodelete, ordername:activeorderdata.metadata.name});
+            $('#deleteorderitemspopup').popup('close');
+        })
+
+    });
+
+    $("#orderexecutebutton").click(function(){
+        var orderitems = getSelectedListItems('orderlistitemcb', ordersviewdata.names);
+        var htmlmessage = '<h3>Setting dates for items:</h3>';
+
+        if (orderitems.length > 0) {
+            for (var i = 0; i < orderitems.length; i++) {
+                htmlmessage += '<p>' + orderitems[i] + '</p>'
+            }
+        }
+        else {
+            htmlmessage += 'No items selected !!';
+            setTimeout(function(){
+                $('#executedatepickerpopup').popup('close')
+            },2000)
+        }
+        htmlmessage += '<p>Note: Setting to empty string will return order to draft status</p>'
+        $('#executeorderitemspopuplist').html(htmlmessage)
+    });
+    $("#executeorderdatepickersubmit").click(function(){
+        var orderitems = getSelectedListItems('orderlistitemcb', ordersviewdata.names);
+        console.log('Setting date! : ')
+        for (var i=0;i<orderitems.length;i++) {
+            var orderdate = $('#executeorderdate').val()
+            console.log(orderdate);
+            console.log(orderitems[i]);
+            var orderdata = {name:orderitems[i],date:orderdate}
+            editOrder({orderdata:orderdata})
+        }
+    });
+
+    $("#refreshordersbutton").click(function(){getAndRenderInvenotries()});
+
+    $( "#ordereditpopup" ).draggable();
+    $( "#addedititempopup" ).draggable();
+    $( "#deleteitemspopup" ).draggable();
+    $( "#addorderitemspopup" ).draggable();
+    $( "#executedatepickerpopup" ).draggable();
+    $( "#ui-datepicker-div" ).draggable();
+
+
+    setTimeout(function(){$('#addedititempartid').textinput('disable')}, 1000)
+
+//    getAndRenderOrderList();
+
+    getAndRenderOrders({timeout:15000000});
+
+})
+
+</script>
+    <!-- /header -->
+    <div data-role="header" >
+        <h1>IIInventory :: Orders</h1>
+        <a href="#nav-panel" data-icon="bars" data-theme="e" data-iconpos="notext">Menu</a>
+        <a href="#settings" data-icon="gear" data-theme="e" data-iconpos="notext">Add</a>
+    </div>
+    <!-- /header -->
+
+    <div data-role="content" class="ui-content-main" style="min-height:600px">
+            <div role="main" class="ui-content content-one" id="content-one">
+                <ul data-role="listview" id="selectionsoptionslistview" data-inset="true" style="width:99%; border:solid; border-width:0 0.1em; border-color:#AAA; margin-bottom:0; box-shadow:none; -webkit-box-shadow: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0">
+                    <li data-role="list-divider">Orders</li>
+                    <li style="padding:0.2em 1em; border-width:0 0 0.1em 0; border-color:#777" >
+                        <div class="ui-grid-b" >
+                            <div class="ui-block-a" style="width:40px">
+                                <div class="buttondiv addtip"><a href="#" id='orderaddbutton' data-rel="popup" data-theme="f" data-role="button" data-icon="plus" data-iconpos="notext">Add</a></div>
+                            </div>
+                            <div class="ui-block-b" style="width:40px">
+                                <div class="buttondiv deletetip"><a href="#deleteorderpopup" id='deleteorderbutton' data-theme="g" data-rel="popup" data-role="button" data-icon="delete" data-iconpos="notext">Delete</a></div>
+                            </div>
+
+                            <div class="ui-block-c" style="width:125px; float:right">
+                                <!--<label for="orderstatusfilterjqmselect">Item Type</label>-->
+                                <select name="orderstatusfilterjqmselect" id="orderstatusfilterjqmselect" class="filterselect" data-mini="true" style="padding:0.25em 1em">
+                                    <option value="all">all</option>
+                                    <option value="active">active</option>
+                                </select>
+                            </div>
+                        </div>
+                    </li>
+                    <li class="headerrow" style="padding:0.4em 0.4em;background-color:#EAEAEA;">
+                        <table>
+                            <tr>
+                                <td style="width:50px">&nbsp;</td>
+                                <td style="width:15px">#</td>
+                                <td style="width:90px; text-align:center">Desc.</td>
+                                <td style="width:50px; text-align:center">Act.</td>
+                                <td style="width:50px; text-align:center">Stat.</td>
+                                <td style=" text-align: center">Supp.</td>
+                            </tr>
+                        </table>
+                    </li>
+                </ul>
+                <ul data-role="listview" id="orderslistview" class="orderslistview ui-corner-all ui-shadow" data-inset="true" style="width:99%;height:100%;margin-bottom:2em; border:solid; border-width:0 0.1em; border-color:#AAA; border-top-left-radius: 0; border-top-right-radius: 0">
+                    <!--<div id="selectionslist">-->
+                        &nbsp;
+                    <!--</div>-->
+                </ul>
+            </div>
+            <div role="main" class="ui-content content-two" style="height:750px;">
+                <ul data-role="listview" data-inset="true" style="width:99%; border:solid; border-width:0 0.1em; border-color:#AAA; margin-bottom:0; box-shadow:none; -webkit-box-shadow: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0">
+                    <li data-role="list-divider">
+                        <div class="ui-grid-a" style="padding:0; margin:0;width:100%">
+                            <div class="ui-block-a">Order Contents</div>
+                            <div class="ui-block-b" style="text-align:right"><span id="orderdetails">&nbsp;</span></div>
+                        </div>
+                    </li>
+                    <li style="padding:0.2em 1em; border-width:0 0 0.1em 0; border-color:#777" class="headerrow">
+                        <div class="ui-grid-c" >
+
+                            <div class="ui-block-b" style="width:40px">
+                                <div class="buttondiv addtip"><a href="#addorderitemspopup" id="addorderitemsbutton" data-rel="popup" data-theme="f" data-role="button" data-icon="plus" data-iconpos="notext">Add</a></div>
+                            </div>
+                            <div class="ui-block-c" style="width:40px">
+                                <div class="buttondiv deletetip"><a href="#deleteorderitemspopup" id='deleteorderitemsbutton' data-theme="g" data-rel="popup" data-role="button" data-icon="delete" data-iconpos="notext">Delete</a></div>
+                            </div>
+                            <div class="ui-block-d" style="width:40px">
+                                <div class="buttondiv refreshitemstip"><a href="#refreshingorderitemspopup" id='refreshorderitemsbutton' data-theme="f" data-rel="popup" data-role="button" data-icon="refresh" data-iconpos="notext">Delete</a></div>
+                            </div>
+                            <div class="ui-block-d" style="width:40px">
+                                <div class="buttondiv importtip"><a href="#importorderitemspopup" data-theme="f" data-rel="popup" data-role="button" data-icon="arrow-u" data-iconpos="notext">Delete</a></div>
+                            </div>
+                        </div>
+                    </li>
+                </ul>
+                <ul class="itemslistview ui-corner-all ui-shadow" data-inset="true" style="width:99%; border:solid; border-width:0 0.1em; border-color:#AAA; border-top-left-radius: 0; border-top-right-radius: 0">
+                    <div id="itemslist">
+                        &nbsp;
+                    </div>
+                </ul>
+            </div>
+	    <div role="main" class="ui-content content-full" >
+            Nothing here.
+        </div>
+    </div><!-- /content -->
+
+    <!-- Popups -->
+
+    <!-- order Edit -->
+    <div data-role="popup" id="ordereditpopup" data-overlay-theme="a" data-theme="b" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="b" class="ui-corner-top ui-dialog-header">
+            <h3>Edit Order "<span id="ordereditpopupnamedisp" style="padding:0;margin:0">&nbsp;</span>"</h3>
+        </div>
+        <div data-role="content" data-theme="a" class="ui-corner-bottom ui-dialog-content edititempopupcontent">
+            <input type="hidden" id="ordereditpopupname" />
+            <label for="ordereditpopupdesc">Description</label>
+            <input type="text" name="ordereditpopupdesc" id="ordereditpopupdesc" value=""  />
+
+            <label for="ordereditpopupnotes">Notes</label>
+            <textarea name="ordereditpopupnotes" id="ordereditpopupnotes" value="" style="height:100px; vertical-align:text-top"></textarea>
+            <h4>Executed:</h4>
+            <div class="ui-grid-c" style="margin-top:0;border-top:none; width:100%">
+                <div class="ui-block-a" style="width:25%;padding-right:5%"><label for="ordereditpopupexecuteddate">Date</label> <input id="ordereditpopupexecuteddate" type="text" data-role="date"></div>
+                <div class="ui-block-b" style="width:25%;padding-right:5%" ><label for="ordereditpopupexecutedtime">Time</label> <input id="ordereditpopupexecutedtime" type="text"></div>
+                    <div class="ui-block-c" ><a href="#" data-role="button" data-mini="true" id="ordereditpopupsetnow" style="margin-top:20px">Now</a></div>
+                <div class="ui-block-d" ><a href="#" data-role="button" data-mini="true" id="ordereditpopupcleartime" style="margin-top:20px">Clear</a></div>
+            </div>
+            <p>Note: empty date will return order to draft status.</p>
+
+            <label for="ordereditpopupsupplier">Supplier</label>
+            <input type="text" name="ordereditpopupsupplier" id="ordereditpopupsupplier" value=""  />
+
+
+
+            <a href="#" data-role="button" id="ordereditsubmit" style="margin-top:30px">Edit Submit</a>
+        </div>
+    </div>
+
+    <!-- order parts add from library add/edit -->
+    <div data-role="popup" id="addorderitemspopup" data-overlay-theme="a" data-theme="b" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="b" class="ui-corner-top ui-dialog-header">
+            <div class="ui-grid-b" style="padding:0;margin:0">
+                <div class="ui-block-a" style="margin-left:1.5em">
+                    <h3>Add Order Items</h3>
+                </div>
+                <!-- This one will just add the items -->
+                <div class="ui-block-b" style="width:40px;padding-top:0.45em">
+                    <div class="addtip"><a href="#" id="addorderitemspopupadditems" data-rel="popup" data-theme="e" data-role="button" data-icon="plus" data-iconpos="notext">Add</a></div>
+                </div>
+                <!-- This one will load the single item into the add/edit screen and use that method -->
+                <div class="ui-block-c" style="width:40px;padding-top:0.45em" >
+                    <div class="addtip"><a href="#" id="addorderitemsaddedit" data-rel="popup" data-theme="e" data-role="button" data-icon="action" data-iconpos="notext">Add</a></div>
+                </div>
+            </div>
+        </div>
+        <!-- Here we are going to borrow the itemslistview style but change height -->
+        <ul class="itemslistview ui-corner-all ui-shadow" data-inset="true" style="width:99%; max-height:500px!important; border:solid; border-width:0 0.1em; border-color:#AAA; border-top-left-radius: 0; border-top-right-radius: 0">
+            <div id="stockitemslist" >
+                &nbsp;
+            </div>
+        </ul>
+    </div>
+
+    <!-- Delete order Items -->
+    <div data-role="popup" id="deleteorderitemspopup" data-overlay-theme="a" data-theme="d" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="d" class="ui-corner-top ui-dialog-header">
+            <h3>Delete Order items?</h3>
+        </div>
+        <div data-role="content" id="deleteorderitempopupcontent" data-theme="a" class="ui-corner-bottom ui-dialog-content">
+            <a href="#" data-role="button" id="deleteorderitemssubmit" style="margin-top:30px">Delete Part</a>
+        </div>
+    </div>
+
+
+
+    <!-- Delete order -->
+    <div data-role="popup" id="deleteorderpopup" data-overlay-theme="a" data-theme="d" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="d" class="ui-corner-top ui-dialog-header">
+            <h3>Delete Order</h3>
+        </div>
+        <div data-role="content" id="deleteorderpopupcontent" data-theme="a" class="ui-corner-bottom ui-dialog-content">
+            <a href="#" data-role="button" id="deleteordersubmit" style="margin-top:30px">Delete Order</a>
+        </div>
+    </div>
+
+    <!-- order Item add/edit -->
+    <div data-role="popup" id="addedititempopup" data-overlay-theme="a" data-theme="b" data-dismissible="true" class="ui-corner-all submitpopup">
+        <div data-role="header" data-theme="b" class="ui-corner-top ui-dialog-header">
+            <h3>Add/Edit Item</h3>
+        </div>
+        <div data-role="content" data-theme="a" class="ui-corner-bottom ui-dialog-content addedititempopupcontent">
+            <input type="hidden" id="addedititemoriginalpartid" />
+
+            <div class="ui-grid-b" style="margin:0; padding:0">
+                <div class="ui-block-a livedisabled" style="padding-right:1em width:30%">
+                    <label for="addedititempartid">PartID</label>
+                    <input type="text" name="addedititempartid" id="addedititempartid" value=""  />
+                </div>
+                 <div class="ui-block-b" style="padding-left:1em; width:30%">
+                    <label for="addedititemqty">Qty</label>
+                    <input type="number" name="addedititemqty" id="addedititemqty" value="1"  />
+                </div>
+                <div class="ui-block-c" style="padding-left:1em; width:30%">
+                    <a href="#" data-role="button" data-mini="true" id="addedititemsubmit" class="addedititemsubmit" style="margin-top:10px">Submit</a>
+                </div>
+            </div>
+            <h4>Received:</h4>
+            <div class="ui-grid-d" style="margin-top:0;border-top:none; width:100%">
+                <div class="ui-block-a" style="width:30%;padding-right:5%"><label for="addedititemreceiveddate">Date</label> <input id="addedititemreceiveddate" type="text" data-role="date"></div>
+                <div class="ui-block-b" style="width:25%;padding-right:5%" ><label for="addedititemreceivedtime">Time</label> <input id="addedititemreceivedtime" type="text"></div>
+                <div class="ui-block-c" ><a href="#" data-role="button" data-mini="true" id="addedititemreceivedsetnow" style="margin-top:10px">Now</a></div>
+                <div class="ui-block-c" ><a href="#" data-role="button" data-mini="true" id="addedititemcleartime" style="margin-top:10px">Clear</a></div>
+            </div>
+            <div>Note: Empty date means not received.</div>
+            <br />
+            <label for="addedititemdescription">Description</label>
+            <textarea name="addedititemdescription" id="addedititemdescription" value="" style="height:100px; vertical-align:text-top"></textarea>
+
+            <label for="addedititemnotes">Notes</label>
+            <input type="text" name="addedititemnotes" id="addedititemnotes" value=""  />
+
+            <label for="addedititemmanufacturer">MFR</label>
+            <input type="text" name="addedititemmanufacturer" id="addedititemmanufacturer" value=""  />
+
+            <label for="addedititemmanufacturerpart">MFR PN</label>
+            <input type="text" name="addedititemmanufacturerpart" id="addedititemmanufacturerpart" value=""  />
+
+            <label for="addedititemsupplier">Supplier</label>
+            <input type="text" name="addedititemsupplier" id="addedititemsupplier" value=""  />
+
+            <label for="addedititemsupplierpart">Supp PN</label>
+            <input type="text" name="addedititemsupplierpart" id="addedititemsupplierpart" value=""  />
+
+            <label for="addedititemcost">Cost</label>
+            <input type="text" name="addedititemcost" id="addedititemcost" value=""  />
+
+            <div class="ui-grid-a" style="padding-top:0; margin-top:0; border:none">
+                <div class="ui-block-a">
+                    <label for="addedititemcostqty">Cost Quantity</label>
+                    <input type="text" name="addedititemcostqty" id="addedititemcostqty" value=""  />
+                </div>
+                <div class="ui-block-b">
+                    <label for="addedititemcostqtyunit">Cost Unit</label>
+                    <input type="text" name="addedititemcostqtyunit" id="addedititemcostqtyunit" value=""  />
+                </div>
+            </div>
+            <div class="ui-grid-a" style="padding-top:0; margin-top:0; border:none">
+                <div class="ui-block-a">
+                    <label for="addedititemtype">Item Type</label>
+                    <select name="addedititemtype" id="addedititemtype" data-mini="true">
+                        <option value="parts">parts</option>
+                        <option value="labor">labor</option>
+                    </select>
+                </div>
+                <div class="ui-block-b">
+                    <label for="addedititemorder">Order</label>
+                    <select name="addedititemorder" id="addedititemorder" data-mini="true">
+                        <option value="std">Std</option>
+                        <option value="none">None</option>
+                    </select>
+                </div>
+            </div>
+            <a href="#" data-role="button" id="addedititemsubmit2" class="addedititemsubmit" style="margin-top:30px">Add/Edit Part</a>
+        </div>
+    </div>
+
+    <!--/Popups -->
+
+    <!-- Panels -->
+    <style>
+        .nav-search .ui-btn-up-a {
+            background-image:none;
+            background-color:#333333;
+        }
+        .nav-search .ui-btn-inner {
+            border-top: 1px solid #888;
+            border-color: rgba(255, 255, 255, .1);
+        }
+    </style>
+
+    <div data-role="panel" data-position="left" data-position-fixed="false" data-display="reveal" id="nav-panel" data-theme="a">
+        <ul data-role="listview" data-theme="a" data-divider-theme="a" style="margin-top:-16px;" class="nav-search">
+            <li data-icon="delete" style="background-color:#111;">
+                <a href="#" data-rel="close">Close menu</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="stock.html" data-ajax="false">Stock</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="inventories.html" data-ajax="false">Inventories</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="boms.html" data-ajax="false">Bill of Materials</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="assemblies.html" data-ajax="false">Assemblies</a>
+            </li>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="orders.html" data-ajax="false">Orders</a>
+            </li>
+        </ul>
+        <!-- panel content goes here -->
+    </div><!-- /panel -->
+
+    <style>
+        .userform { padding:.8em 1.2em; }
+        .userform h2 { color:#555; margin:0.3em 0 .8em 0; padding-bottom:.5em; border-bottom:1px solid rgba(0,0,0,.1); }
+        .userform label { display:block; margin-top:1.2em; }
+        .switch .ui-slider-switch { width: 6.5em !important }
+        .ui-grid-a { margin-top:1em; padding-top:.8em; margin-top:1.4em; border-top:1px solid rgba(0,0,0,.1); }
+    </style>
+
+    <div data-role="panel" data-position="right" data-position-fixed="false" data-display="overlay" id="settings" data-theme="b">
+
+            <ul data-role="listview" data-theme="a" data-divider-theme="a" style="margin-top:-16px;" class="nav-search">
+
+                <li data-icon="delete" style="background-color:#111;">
+                    <a href="#" data-rel="close">Close menu</a>
+                </li>
+
+                <?php
+                if($user->logged_in()):
+                ?>
+
+                    <li><div class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0.7em"><?php echo $_SESSION['user']['name']; ?></div></li>
+                    <li><a data-ajax="false" href="/auth/logoutmobile">Log out</a></li>
+                    <?php
+                endif;
+                if(!$user->logged_in()):
+                ?>
+                    <li><div class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0.7em">Not logged in</div></li>
+                    <li><a data-ajax="false" href="/auth/loginmobile" style="padding-right:10px">Log in</a></li>
+                <?php
+                    endif;
+                ?>
+                <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                    <a href="auth/manage.php">Manager user</a>
+                </li>
+
+            </ul>
+        <!-- panel content goes here -->
+    </div><!-- /panel -->
+
+    <style>
+        .userform { padding:.8em 1.2em; }
+        .userform h2 { color:#555; margin:0.3em 0 .8em 0; padding-bottom:.5em; border-bottom:1px solid rgba(0,0,0,.1); }
+        .userform label { display:block; margin-top:1.2em; }
+        .switch .ui-slider-switch { width: 6.5em !important }
+        .ui-grid-a { margin-top:1em; padding-top:.8em; margin-top:1.4em; border-top:1px solid rgba(0,0,0,.1); }
+    </style>
+
+    <div data-role="panel" data-position="right" data-position-fixed="false" data-display="overlay" id="settings" data-theme="b">
+
+        <!--<form class="userform">-->
+        <ul data-role="listview" data-theme="a" data-divider-theme="a" style="margin-top:-16px;" class="nav-search">
+
+            <li data-icon="delete" style="background-color:#111;">
+                <a href="#" data-rel="close">Close menu</a>
+            </li>
+
+            <?php
+            if($user->logged_in()):
+            ?>
+
+                <li><div class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0"><?php echo $_SESSION['user']['name']; ?></div></li>
+                <li><div id="pathalias" class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0">&nbsp;</div></li>
+                <li><a data-ajax="false" href="/auth/logoutmobile">Log out</a></li>
+                <?php
+            endif;
+            if(!$user->logged_in()):
+            ?>
+                <li><div class="ui-btn-text ui-btn-inner" style="text-align: center; font-size:12.5px; padding-top:0.7em">Not logged in</div></li>
+                <li><a data-ajax="false" href="/auth/loginmobile" style="padding-right:10px">Log in</a></li>
+            <?php
+                endif;
+            ?>
+            <li data-filtertext="wai-aria voiceover accessibility screen reader">
+                <a href="auth/manage.php">Manage user</a>
+            </li>
+
+        </ul>
+
+        <!-- panel content goes here -->
+    </div><!-- /panel -->
+    <!-- /Panels -->
+
+	<div data-role="footer" data-theme="d">
+		<div class="footertext">Copyright 2016 Interface Innovations</div>
+	</div><!-- /footer -->
+</div><!-- /page -->
+
+</body>
+</html>
